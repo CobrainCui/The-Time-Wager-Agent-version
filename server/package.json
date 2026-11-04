@@ -1,0 +1,39 @@
+{
+  "name": "guangyin-server-new",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "光阴对赌新新新 服务端",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=20 <23",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js",
+    "test": "npm run build && node --test dist/logic/gameDataCatalog.test.js dist/logic/projectDraw.era.test.js dist/logic/projectSettlement.long.test.js dist/logic/projectSettlement.tied.test.js dist/logic/rankRewardSchedule.test.js dist/logic/auctionCards.revoke.test.js dist/logic/auctionCards.pool.test.js dist/logic/auctionCards.wealth.test.js dist/logic/lotterySettle.test.js dist/logic/wealthAdjust.test.js dist/logic/adminPlayerCard.test.js dist/logic/adminPerspective.test.js dist/logic/adminProjectAdjust.test.js dist/logic/deviceClaim.test.js dist/logic/coffeeLogic.test.js dist/logic/investmentLogic.energy.test.js dist/logic/analysisLogic.persona.test.js dist/logic/buffLogic.test.js dist/logic/buffCardCopySync.test.js dist/logic/p0Guards.test.js dist/logic/p1Guards.test.js dist/logic/p2Guards.test.js dist/logic/transactionHistory.test.js dist/logic/forbiddenText.test.js dist/logic/chatGroups.test.js dist/config/clientBuild.test.js dist/state/actionTimeExpiry.test.js dist/state/actionDeadline.test.js dist/state/startingWealth.test.js dist/state/sessionTelemetry.test.js dist/export/sessionExport.test.js"
+  },
+  "dependencies": {
+    "@types/cors": "^2.8.19",
+    "cors": "^2.8.6",
+    "debug": "^4.4.3",
+    "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
+    "express": "^4.18.2",
+    "multer": "^2.4.0",
+    "openai": "^6.46.0",
+    "socket.io": "^4.8.4"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^25.0.3",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}

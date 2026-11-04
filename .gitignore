@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+frontend/dist/
+server/dist/
+agents/dist/
+
+# Local secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Runtime data (keep dir, ignore archives/uploads)
+logs/
+*.log
+server/data/session_archive.json
+server/data/session_archive.json.bak
+server/data/community_leaderboard.json
+server/data/community_leaderboard.json.bak
+server/data/uploads/
+server/data/uploads_eras/
+server/data/uploads_buffs/
+server/data/uploads_personas/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Misc
+*.zip
+*.bak
+.eslintcache

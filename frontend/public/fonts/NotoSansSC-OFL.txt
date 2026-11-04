@@ -1,0 +1,4 @@
+Noto Sans SC — Google / Adobe (Noto CJK)
+Licensed under the SIL Open Font License, Version 1.1
+https://scripts.sil.org/OFL
+Source: https://github.com/notofonts/noto-cjk (Sans2.004 NotoSansSC-Regular)
