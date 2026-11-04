@@ -15,6 +15,8 @@ agents/dist/
 
 # Runtime data (keep dir, ignore archives/uploads)
 logs/
+experiments/
+/analysis/
 *.log
 server/data/session_archive.json
 server/data/session_archive.json.bak
@@ -35,3 +37,6 @@ Thumbs.db
 *.zip
 *.bak
 .eslintcache
+
+# WorkBuddy 工作区数据（本地记忆/缓存，不入库）
+.workbuddy/

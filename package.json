@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "光阴对赌 · 全 AI Agent 玩家版（无玩家前端，仅管理员观察与数据导出，本地运行）",
+  "description": "光阴对赌 · 全 AI Agent 实验室版（LLM-only、可复现、管理端观察与数据导出，本地运行）",
   "engines": {
-    "node": ">=20 <23",
+    "node": ">=20",
     "npm": ">=10"
   },
   "scripts": {
@@ -13,6 +13,9 @@
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
     "start": "node scripts/start.mjs",
+    "experiment": "node scripts/experiment.mjs",
+    "analyze": "node scripts/analyze.mjs",
+    "mock-llm": "node scripts/mock-llm.mjs",
     "agents": "npm --prefix agents run start",
     "server": "npm --prefix server run start",
     "admin:dev": "npm --prefix frontend run dev"

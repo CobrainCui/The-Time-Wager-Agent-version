@@ -1,6 +1,12 @@
 import type { GameState, ChatGroup, GroupMessage } from "../state/gameState.js";
 import { isAiPlayer } from "../util/isAiPlayer.js";
 import {
+  CHAT_BLOCKED_PHASES,
+  MAX_CHAT_MESSAGE_LENGTH,
+  chatQuotaError,
+  recordPublicChat,
+} from "./chatQuota.js";
+import {
   maskForbiddenText,
   normalizeNoteInput,
   sanitizeTransactionNote,
@@ -13,8 +19,6 @@ export const PUBLIC_GROUP_NAME = "全场";
 export const MAX_CUSTOM_GROUPS_PER_PLAYER = 6;
 export const MAX_CUSTOM_GROUPS_PER_ROOM = 24;
 export const MAX_MESSAGES_PER_GROUP = 500;
-
-const BLOCKED_PHASES = new Set<GameState["phase"]>(["ROOM_WAITING", "ERA_INTRO", "TUTORIAL"]);
 
 function ensureArrays(game: GameState): void {
   if (!game.chatGroups) game.chatGroups = [];
@@ -70,7 +74,12 @@ export function ensurePublicChatGroup(game: GameState): void {
 
 export function syncChatGroupsOnRosterChange(game: GameState): void {
   ensureArrays(game);
-  syncPublicChatGroupMembers(game);
+  // 实验版默认开放全场频道：房间里有至少 2 名可聊天玩家时自动创建。
+  if (humanIds(game).length >= 2) {
+    ensurePublicChatGroup(game);
+  } else {
+    syncPublicChatGroupMembers(game);
+  }
   const humans = new Set(humanIds(game));
   game.chatGroups = (game.chatGroups ?? []).filter((g) => {
     if (g.kind === "public") return true;
@@ -130,7 +139,7 @@ export function createCustomChatGroup(
   memberIds: string[],
   nameRaw?: string
 ): CreateGroupResult {
-  if (BLOCKED_PHASES.has(game.phase)) {
+  if (CHAT_BLOCKED_PHASES.has(game.phase)) {
     return { ok: false, error: "当前阶段无法建群" };
   }
   ensureArrays(game);
@@ -187,7 +196,7 @@ export function addChatGroupMembers(
   groupId: string,
   newMemberIds: string[]
 ): { ok: true } | { ok: false; error: string } {
-  if (BLOCKED_PHASES.has(game.phase)) {
+  if (CHAT_BLOCKED_PHASES.has(game.phase)) {
     return { ok: false, error: "当前阶段无法操作群聊" };
   }
   ensureArrays(game);
@@ -254,7 +263,7 @@ export function sendGroupChatMessage(
   rawText: unknown,
   clientTempId?: string
 ): SendGroupMessageResult {
-  if (BLOCKED_PHASES.has(game.phase)) {
+  if (CHAT_BLOCKED_PHASES.has(game.phase)) {
     return { ok: false, error: "当前阶段无法发送群消息" };
   }
   ensureArrays(game);
@@ -266,11 +275,15 @@ export function sendGroupChatMessage(
   if (!group || !group.memberIds.includes(senderId)) {
     return { ok: false, error: "你不在该群中" };
   }
+  const quota = chatQuotaError(game, senderId, "public");
+  if (quota) return { ok: false, error: quota };
   const trimmed = normalizeNoteInput(rawText);
   if (!trimmed) {
     return { ok: false, error: "消息不能为空" };
   }
-  const text = sanitizeTransactionNote(trimmed);
+  const text = maskForbiddenText(
+    sanitizeTransactionNote(trimmed).slice(0, MAX_CHAT_MESSAGE_LENGTH)
+  );
   const tempId =
     typeof clientTempId === "string" && clientTempId.length > 0 && clientTempId.length <= 64
       ? clientTempId
@@ -286,6 +299,7 @@ export function sendGroupChatMessage(
     clientTempId: tempId,
   };
   game.groupMessages!.push(message);
+  recordPublicChat(game, senderId);
   pruneGroupMessages(game);
 
   const notifyTargets = group.memberIds.filter((id) => id !== senderId);

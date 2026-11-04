@@ -5,6 +5,54 @@ import { createLogger } from "./logger.js";
 const log = createLogger("llm");
 const clients = new Map<string, OpenAI>();
 
+export class LlmFailureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LlmFailureError";
+  }
+}
+
+export class TokenBudgetExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TokenBudgetExceededError";
+  }
+}
+
+export interface LlmUsage {
+  prompt: number;
+  completion: number;
+  total: number;
+  calls: number;
+}
+
+const usageByAgent = new Map<number, LlmUsage>();
+
+export function resetAgentUsage(agentIndex: number): void {
+  usageByAgent.set(agentIndex, { prompt: 0, completion: 0, total: 0, calls: 0 });
+}
+
+export function getAgentUsage(agentIndex: number): LlmUsage {
+  return usageByAgent.get(agentIndex) ?? { prompt: 0, completion: 0, total: 0, calls: 0 };
+}
+
+function recordUsage(
+  agentIndex: number,
+  usage: { prompt: number; completion: number; total: number } | undefined
+): LlmUsage {
+  const current = getAgentUsage(agentIndex);
+  if (usage) {
+    current.prompt += usage.prompt;
+    current.completion += usage.completion;
+    current.total += usage.total;
+    current.calls += 1;
+  } else {
+    current.calls += 1;
+  }
+  usageByAgent.set(agentIndex, current);
+  return current;
+}
+
 function getClient(agent: AgentConfig): OpenAI {
   const key = `${agent.index}:${agent.baseURL ?? "default"}:${agent.apiKey}`;
   let client = clients.get(key);
@@ -30,35 +78,65 @@ function stripJsonFence(text: string): string {
 }
 
 function parseJson(text: string): unknown {
-  const cleaned = stripJsonFence(text);
-  return JSON.parse(cleaned);
+  return JSON.parse(stripJsonFence(text));
 }
 
 export interface LlmResult {
-  ok: boolean;
-  data?: unknown;
-  raw?: string;
-  error?: string;
+  ok: true;
+  data: unknown;
+  raw: string;
   usage?: { prompt: number; completion: number; total: number };
+  latencyMs: number;
+}
+
+export interface AskOptions {
+  timeoutMs: number;
+  maxRetries: number;
+  maxOutputTokens: number;
+  tokenBudget: number;
+  /** 用于日志与错误信息 */
+  label: string;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function requestOnce(
   agent: AgentConfig,
   system: string,
   user: string,
+  opts: AskOptions,
   useJsonMode: boolean
-): Promise<LlmResult> {
+): Promise<{ data: unknown; raw: string; usage?: LlmResult["usage"]; latencyMs: number }> {
   const client = getClient(agent);
+  const startedAt = Date.now();
   const params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
     model: agent.model,
     temperature: agent.temperature,
+    max_tokens: opts.maxOutputTokens,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
     ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
   };
-  const response = await client.chat.completions.create(params);
+
+  const request = client.chat.completions.create(params, { timeout: opts.timeoutMs });
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`timeout ${opts.timeoutMs}ms`)),
+      opts.timeoutMs + 500
+    );
+  });
+  let response: OpenAI.Chat.ChatCompletion;
+  try {
+    response = (await Promise.race([request, timeout])) as OpenAI.Chat.ChatCompletion;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+
   const raw = response.choices[0]?.message?.content ?? "";
   const usage = response.usage
     ? {
@@ -67,60 +145,65 @@ async function requestOnce(
         total: response.usage.total_tokens,
       }
     : undefined;
-  if (!raw.trim()) {
-    return { ok: false, raw, error: "empty response", usage };
-  }
-  try {
-    return { ok: true, data: parseJson(raw), raw, usage };
-  } catch (e) {
-    return { ok: false, raw, error: `JSON parse failed: ${String(e)}`, usage };
-  }
+  if (!raw.trim()) throw new Error("empty response");
+  return { data: parseJson(raw), raw, usage, latencyMs: Date.now() - startedAt };
 }
 
-/** 调用单个 Agent 自己的模型；失败时自动重试一次（不带 JSON mode）。 */
+/**
+ * 调用单个 Agent 的模型。
+ *
+ * 实验版不提供规则兜底：重试耗尽后抛出 LlmFailureError，由上层终止本局并标记失败。
+ * 这保证「模型失败」不会被静默替换成另一种策略，污染条件比较。
+ */
 export async function askAgentJson(
   agent: AgentConfig,
   system: string,
   user: string,
-  timeoutMs: number
+  opts: AskOptions
 ): Promise<LlmResult> {
-  const tagged = `agent#${agent.index}/${agent.name}/${agent.model}`;
-
-  const run = async (useJsonMode: boolean): Promise<LlmResult> => {
-    try {
-      return await requestOnce(agent, system, user, useJsonMode);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      log.warn(`${tagged} 请求失败（jsonMode=${useJsonMode}）：${msg}`);
-      return { ok: false, error: msg };
-    }
-  };
-
-  const withTimeout = async (p: Promise<LlmResult>): Promise<LlmResult> => {
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<LlmResult>((resolve) => {
-      timer = setTimeout(() => resolve({ ok: false, error: `timeout ${timeoutMs}ms` }), timeoutMs);
-    });
-    try {
-      return await Promise.race([p, timeout]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  };
-
-  let result = await withTimeout(run(true));
-  if (!result.ok) {
-    log.warn(`${tagged} 首次失败：${result.error ?? "unknown"}，重试…`);
-    result = await withTimeout(run(false));
+  const tagged = `agent#${agent.index}/${agent.name}/${agent.provider}/${agent.model}/${opts.label}`;
+  const before = getAgentUsage(agent.index);
+  if (before.total >= opts.tokenBudget) {
+    throw new TokenBudgetExceededError(
+      `${tagged} 已达 token 上限（${before.total}/${opts.tokenBudget}），终止本局。`
+    );
   }
-  if (result.ok) {
-    if (result.usage) {
+
+  const errors: string[] = [];
+  for (let attempt = 1; attempt <= opts.maxRetries; attempt++) {
+    const useJsonMode = attempt === 1;
+    try {
+      const result = await requestOnce(agent, system, user, opts, useJsonMode);
+      const total = recordUsage(agent.index, result.usage);
       log.info(
-        `${tagged} 调用成功 tokens=${result.usage.total} (in ${result.usage.prompt} / out ${result.usage.completion})`
+        `${tagged} 成功 tokens=${result.usage?.total ?? "?"} ` +
+          `(in ${result.usage?.prompt ?? "?"} / out ${result.usage?.completion ?? "?"}) ` +
+          `latency=${result.latencyMs}ms 累计=${total.total}/${opts.tokenBudget}`
       );
+      if (total.total > opts.tokenBudget) {
+        throw new TokenBudgetExceededError(
+          `${tagged} 本局 token ${total.total} 超过上限 ${opts.tokenBudget}，终止本局。`
+        );
+      }
+      return {
+        ok: true,
+        data: result.data,
+        raw: result.raw,
+        usage: result.usage,
+        latencyMs: result.latencyMs,
+      };
+    } catch (e) {
+      if (e instanceof TokenBudgetExceededError) throw e;
+      const message = e instanceof Error ? e.message : String(e);
+      errors.push(`attempt ${attempt}: ${message}`);
+      log.warn(`${tagged} 第 ${attempt}/${opts.maxRetries} 次失败：${message}`);
+      if (attempt < opts.maxRetries) {
+        await sleep(700 * attempt + Math.floor(Math.random() * 300));
+      }
     }
-  } else {
-    log.error(`${tagged} 调用失败：${result.error ?? "unknown"}`);
   }
-  return result;
+
+  throw new LlmFailureError(
+    `${tagged} 调用失败（已重试 ${opts.maxRetries} 次）：${errors.join(" | ")}`
+  );
 }

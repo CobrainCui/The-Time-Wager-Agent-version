@@ -8,30 +8,43 @@ async function main(): Promise<void> {
   const runtime = loadRuntimeConfig();
   initFileLogging(runtime.logDir);
 
-  log.info("光阴对赌 · Agent 运行时");
+  log.info("光阴对赌 · Agent 实验运行时（LLM-only，无规则兜底）");
   log.info(`房间：${runtime.roomId}`);
   log.info(`服务端：${runtime.serverUrl}`);
+  log.info(
+    `实验：run=${runtime.runId} | condition=${runtime.condition} | seed=${runtime.seed} | prompt=${runtime.promptVersion}`
+  );
+  log.info(
+    `能力：chat=${runtime.chatEnabled} memory=${runtime.memoryEnabled} prediction=${runtime.predictionEnabled}`
+  );
   for (const a of runtime.agents) {
-    const keyState = runtime.offlineMode ? "内置策略" : a.apiKey ? "已配置 API Key" : "缺少 Key";
-    log.info(`  #${a.index} ${a.name} / ${a.persona} / ${a.model} / ${keyState}`);
-  }
-  if (runtime.offlineMode) {
-    log.warn("当前为离线/内置策略模式：不会调用大模型。填写根目录 .env 的 6 个 API Key 后重启即可启用 LLM。");
+    log.info(`  #${a.index} ${a.name} / ${a.provider} / ${a.model} / key=已配置`);
   }
 
-  const orchestrator = new Orchestrator(runtime);
+  let exiting = false;
+  const shutdown = (code: number, message?: string, isError = true) => {
+    if (exiting) return;
+    exiting = true;
+    if (message) {
+      if (isError) log.error(message);
+      else log.info(message);
+    }
+    orchestrator.stop();
+    setTimeout(() => process.exit(code), 500);
+  };
+
+  const orchestrator = new Orchestrator(runtime, {
+    onComplete: (games) => shutdown(0, `实验完成：共 ${games} 局`, false),
+    onFatal: (agentIndex, error) =>
+      shutdown(2, `实验失败（agent ${agentIndex || "-"}）：${String(error)}`),
+  });
   orchestrator.start();
 
-  const shutdown = () => {
-    log.info("收到退出信号，正在关闭…");
-    orchestrator.stop();
-    setTimeout(() => process.exit(0), 300);
-  };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => shutdown(130, "收到 SIGINT"));
+  process.on("SIGTERM", () => shutdown(143, "收到 SIGTERM"));
 }
 
 main().catch((e) => {
-  log.error("启动失败", e instanceof Error ? e.stack : e);
+  log.error("启动失败", e instanceof Error ? e.stack ?? e.message : e);
   process.exit(1);
 });

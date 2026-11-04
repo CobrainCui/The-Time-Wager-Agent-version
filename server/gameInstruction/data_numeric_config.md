@@ -73,4 +73,4 @@
 ## 数据留存 / 导出
 - 行为数据走 `sessionTelemetry` 事件流；命局存 `server/data/session_archive.json`（唯一真相源）。
 - 社区财富榜由档案派生，不再单独落盘。
-- 导出 schema 版本 `exportSchemaVersion = 1.2.0`。
+- 导出 schema 版本 `exportSchemaVersion = 1.3.0`。

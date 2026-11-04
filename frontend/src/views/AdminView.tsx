@@ -364,12 +364,29 @@ export const AdminView: React.FC<Props> = ({
     setAdminTxAtBottom(atBottom);
   }, []);
 
+  const adminDirectAsTx = useMemo<Transaction[]>(() => {
+    return (game.directMessages ?? []).map((m) => ({
+      id: m.id,
+      fromId: m.fromId,
+      fromName: m.fromName,
+      toId: m.toId,
+      toName: m.toName,
+      amount: 0,
+      note: m.text,
+      status: "accepted" as const,
+      timestamp: m.timestamp,
+    }));
+  }, [game.directMessages]);
+
   const adminTxDisplayList = useMemo(() => {
-    if (!dmViewAsPlayerId) return adminTxList;
-    return adminTxList.filter(
+    const merged = [...adminTxList, ...adminDirectAsTx]
+      .filter((t, i, arr) => arr.findIndex((x) => x.id === t.id) === i)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    if (!dmViewAsPlayerId) return merged;
+    return merged.filter(
       (t) => t.fromId === dmViewAsPlayerId || t.toId === dmViewAsPlayerId
     );
-  }, [adminTxList, dmViewAsPlayerId]);
+  }, [adminTxList, adminDirectAsTx, dmViewAsPlayerId]);
 
   const adminChatGroups = useMemo(() => {
     if (!PLAYER_GROUP_CHAT_ENABLED) return [];
@@ -691,6 +708,11 @@ export const AdminView: React.FC<Props> = ({
             <span style={{ fontFamily: "var(--font-mono)", fontSize: uiRem(0.8), color: "var(--color-text-muted)" }}>
               Room: {game.roomId}
             </span>
+            {game.experiment && (
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: uiRem(0.72), color: "#a78bfa" }}>
+                条件 {game.experiment.condition ?? "ad-hoc"} · seed {game.seed ?? "—"} · run {game.experiment.runId?.slice(0, 18) ?? "—"}
+              </span>
+            )}
           </div>
           <div style={{ display: "flex", gap: "1rem", alignItems: "center", marginTop: "0.25rem", flexWrap: "wrap", fontSize: uiRem(0.8) }}>
             <span>
@@ -1738,6 +1760,53 @@ export const AdminView: React.FC<Props> = ({
           </div>
 
           <AdminProjectAdjustPanel game={game} />
+
+          {/* 实验室记录：预测 + Agent 决策（仅上帝视角下发） */}
+          <div
+            style={{
+              background: "var(--color-bg-card)",
+              border: "1px solid var(--color-border)",
+              borderRadius: "1.25rem",
+              padding: "1rem 1.25rem",
+              marginBottom: "1rem",
+            }}
+          >
+            <h2 style={{ fontWeight: 700, fontSize: uiRem(1), marginBottom: "0.5rem" }}>
+              🧪 实验记录
+            </h2>
+            <div style={{ fontSize: uiRem(0.72), color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>
+              预测 {game.predictions?.length ?? 0} 条 · Agent 决策 {game.agentDecisions?.length ?? 0} 条
+            </div>
+            {(game.predictions?.length ?? 0) > 0 && (
+              <div style={{ maxHeight: "180px", overflowY: "auto", marginBottom: "0.75rem" }}>
+                {game.predictions!.slice(-12).map((p) => (
+                  <div key={p.id} style={{ fontSize: uiRem(0.7), padding: "0.25rem 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                    <span style={{ color: "#fbbf24" }}>{p.playerName}</span>
+                    <span style={{ color: "var(--color-text-muted)" }}> 时代 {p.era} </span>
+                    <span>
+                      {p.ranking
+                        .map((id) => game.players.find((x) => x.id === id)?.name ?? id)
+                        .join(" > ")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {(game.agentDecisions?.length ?? 0) > 0 && (
+              <div style={{ maxHeight: "220px", overflowY: "auto" }}>
+                {game.agentDecisions!.slice(-40).reverse().map((d) => (
+                  <div key={d.id} style={{ fontSize: uiRem(0.7), padding: "0.3rem 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                    <span style={{ color: "#60a5fa" }}>{d.playerName}</span>
+                    <span style={{ color: "var(--color-text-muted)" }}>
+                      {" "}
+                      {d.kind} · R{d.globalRound} · {d.model ?? ""} {d.totalTokens ? `· ${d.totalTokens} tok` : ""}
+                    </span>
+                    <div style={{ color: "var(--color-text-secondary)" }}>{d.reasoning}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* 日志 */}
           <div

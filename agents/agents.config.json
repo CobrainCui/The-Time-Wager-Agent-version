@@ -1,50 +1,26 @@
 [
   {
     "index": 1,
-    "name": "沈砚",
-    "persona": "罗盘精算师",
-    "style": "你追求极致 ROI，规避不确定性。先算排名奖励、时代加成和投爆风险，再决定精力分配。几乎不碰风险项目，很少用干扰卡；愿意为高确定性的长期项目持续投入。",
-    "auctionMaxWealthRatio": 0.22,
-    "riskTolerance": 0.1
+    "name": "Agent 1"
   },
   {
     "index": 2,
-    "name": "林栖",
-    "persona": "时荫植者",
-    "style": "你是绝对的长期主义者。优先把精力投入需要多轮积累的长期项目，即使前两轮回报很低。除非长期项目已满额，否则不投短期和风险。道具优先拿点石成金/保险，不主动害人。",
-    "auctionMaxWealthRatio": 0.2,
-    "riskTolerance": 0.08
+    "name": "Agent 2"
   },
   {
     "index": 3,
-    "name": "陆燃",
-    "persona": "涌机触发者",
-    "style": "你风险偏好极高、喜欢干预规则。优先投资风险项目，积极使用摸鱼传染、项目做空、打火机等道具打击领先者。拍卖中愿意为强买强卖和干扰卡出高价。",
-    "auctionMaxWealthRatio": 0.42,
-    "riskTolerance": 0.85
+    "name": "Agent 3"
   },
   {
     "index": 4,
-    "name": "苏瞬",
-    "persona": "瞬刻炼金士",
-    "style": "你极度缺乏耐心，追求当轮就能变现的短期项目。精力尽量投满短期项目，剩余再投风险。喜欢用道具卡干扰他人，尤其针对财富领先者。",
-    "auctionMaxWealthRatio": 0.34,
-    "riskTolerance": 0.45
+    "name": "Agent 4"
   },
   {
     "index": 5,
-    "name": "周桥",
-    "persona": "桥梁架构师",
-    "style": "你重视关系与共赢。愿意用转账和承诺换取合作，倾向共同把长期项目做大。道具优先保险/劳逸结合，少主动攻击；但会惩罚背叛者。",
-    "auctionMaxWealthRatio": 0.18,
-    "riskTolerance": 0.25
+    "name": "Agent 5"
   },
   {
     "index": 6,
-    "name": "白歌",
-    "persona": "随机诗人",
-    "style": "你灵活多变，善于观察全场。根据当前排名、时代主题和项目分布临时决定策略：领先时求稳，落后时冒险。道具与拍卖都按局势选择。",
-    "auctionMaxWealthRatio": 0.3,
-    "riskTolerance": 0.5
+    "name": "Agent 6"
   }
 ]

@@ -21,6 +21,35 @@ export interface TransactionView {
   timestamp: number;
 }
 
+export interface ChatGroupView {
+  id: string;
+  kind: "public" | "custom";
+  name: string;
+  memberIds: string[];
+}
+
+export interface GroupMessageView {
+  id: string;
+  groupId: string;
+  fromId: string;
+  fromName: string;
+  text: string;
+  timestamp: number;
+}
+
+export interface DirectMessageView {
+  id: string;
+  fromId: string;
+  fromName: string;
+  toId: string;
+  toName: string;
+  text: string;
+  timestamp: number;
+  era: number;
+  roundInEra: number;
+  globalRound: number;
+}
+
 export interface ProjectView {
   id: number;
   name: string;
@@ -49,8 +78,8 @@ export interface PlayerView {
   aiPersona?: string;
   isAgent?: boolean;
   agentIndex?: number;
-  agentPersona?: string;
   agentModel?: string;
+  agentProvider?: string;
   investment?: Record<string, number>;
   investmentDraft?: Record<string, number>;
   inventory?: string[];
@@ -92,8 +121,33 @@ export interface GameSnapshot {
   players: PlayerView[];
   activeProjects: ProjectView[];
   transactions: TransactionView[];
+  chatGroups?: ChatGroupView[];
+  groupMessages?: GroupMessageView[];
+  directMessages?: DirectMessageView[];
+  predictions?: Array<{
+    id: string;
+    playerId: string;
+    playerName: string;
+    era: number;
+    globalRound: number;
+    ranking: string[];
+    reasoning: string;
+    timestamp: number;
+  }>;
   currentEraCard?: { id: number; name: string; era?: string; description?: string };
   logs?: string[];
+  settlementHistory?: Array<{
+    round: number;
+    currentEra: number;
+    roundInEra: number;
+    results: Array<{
+      projectId: number;
+      name: string;
+      type: "short" | "long" | "risk";
+      playerInvestments: Record<string, number>;
+      playerGains: Record<string, { total: number }>;
+    }>;
+  }>;
   readyPlayers?: string[];
   investmentEndsAt?: number;
   investmentTimerPausedAt?: number;
@@ -116,6 +170,28 @@ export interface GameSnapshot {
     timestamp: number;
   }>;
   auctionSoldLots?: Array<{ cardId: string; playerId: string; playerName?: string; cost: number }>;
+  /** 仅上帝视图下发：本场拍卖卡池（由服务端提供，避免 Agent 侧硬编码） */
+  auctionPoolCardIds?: string[];
+  /** 仅上帝视图下发：实验元数据 */
+  experiment?: {
+    runId: string | null;
+    condition: string | null;
+    seedBase: number;
+    seed: number;
+    sessionOrdinal: number;
+    manifestId: string | null;
+    manifestPath: string | null;
+    promptVersion: string | null;
+    promptHash?: string | null;
+    mock?: boolean;
+    policyMode: string;
+    gitCommit: string | null;
+    nodeVersion: string;
+    serverStartedAt: number;
+  } | null;
+  seed?: number | null;
+  seedBase?: number | null;
+  sessionOrdinal?: number;
   globalLeaderboard?: Array<{ name: string; score: number }>;
 }
 
@@ -146,7 +222,6 @@ export interface Observation {
     ready: boolean;
     isMe: boolean;
     isAgent: boolean;
-    agentPersona: string | null;
     inventoryCount: number;
   }>;
   projects: ProjectView[];
@@ -154,6 +229,10 @@ export interface Observation {
   currencyLeader: string | null;
   pendingTransactions: TransactionView[];
   myPendingTransactions: TransactionView[];
+  publicMessages: GroupMessageView[];
+  privateMessages: DirectMessageView[];
+  publicGroupId: string | null;
+  settlementHistory: NonNullable<GameSnapshot["settlementHistory"]>;
   auction: {
     focusCardId: string | null;
     currentBid: number;
@@ -167,8 +246,15 @@ export interface Observation {
   recentLogs: string[];
 }
 
+export interface ChatMessagePlan {
+  channel: "public" | "private";
+  toPlayerId?: string;
+  text: string;
+}
+
 export interface InvestmentPlan {
   reasoning?: string;
+  messages?: ChatMessagePlan[];
   transfer?: { toPlayerId: string; amount: number; note?: string } | null;
   coffee?: number;
   useCard?: {
@@ -180,6 +266,11 @@ export interface InvestmentPlan {
   } | null;
   investment: Record<string, number>;
   ready?: boolean;
+}
+
+export interface PredictionPlan {
+  reasoning?: string;
+  ranking: string[];
 }
 
 export interface AuctionPlan {

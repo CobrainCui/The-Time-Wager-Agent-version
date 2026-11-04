@@ -1,22 +1,31 @@
-# 光阴对赌 · Agent 版（agent-edition）
+# 光阴对赌 · Agent 实验室版（agent-edition）
 
-> 6 名独立 AI 玩家在本地跑完一整局《光阴对赌》；管理者只观察、控场、导出数据。
-> 本目录是父仓库 `光阴对赌新新新` 的实验分支副本，**不参与线上部署**。
+> 6 个独立 LLM 玩家在同一局《光阴对赌》中完成 **4 时代 × 2 轮 = 8 轮**投资、3 场拍卖和社区命名；
+> 管理员观察、控场、导出可直接用于分析的事件级数据。
+>
+> 本目录是父仓库 `光阴对赌新新新` 的实验分支副本，**只用于本地实验，不参与线上部署**。
 
 ---
 
-## 状态快照（2026-11-04 11:00）
+## 0. 这一版和上一版的区别
 
-| 项目 | 结论 |
-|------|------|
-| 是否仍在被修改 | **否**。最后一次写入为 10:50:39（`logs/agents-*.jsonl`）；检查时 3001 / 5173 无监听，无相关 node 进程。上一个进程已被终止。 |
-| 能否编译 | ✅ `server` / `agents` / `frontend` 均通过 |
-| 自动化测试 | ✅ 服务端 251 / 251 通过 |
-| 端到端 | ✅ 6 个内置策略 Agent 可完成 8 轮投资、3 场拍卖、社区命名并进入 `GAME_OVER` |
-| LLM 真实调用 | ⚠️ 代码完整，但根 `.env` 仍为占位 Key，**LLM 路径尚未真实跑通** |
-| 沟通 / 记忆 / 心智理论 | ❌ 尚未实现，见下方「当前完成度」 |
+上一版是「能跑完整局的 Agent Demo」。这一版按**实验室工具**重做，核心变化：
 
-> 本表是审计时点快照，不代表后续状态。重新运行前请先看「快速开始」与「故障排查」。
+| 项目 | 上一版 | 本版 |
+|------|--------|------|
+| 缺 Key 时 | 回退内置规则策略，静默跑完 | **直接报错退出**，不产生伪数据 |
+| LLM 调用失败 | 回退规则策略 | 重试后仍失败 → **终止本局并标记失败** |
+| Agent 人格 | 6 套预置人格提示词 | **全部中立**，只有编号；差异只来自模型/供应商与对局经历 |
+| Harness | 各 Agent 略有差异 | **同一套系统提示词、同一套能力开关、同一温度、同一 token 预算** |
+| 沟通 | 群聊开关关闭 | **公开群聊 + 一对一私聊全开**，发言进入导出 |
+| 记忆 | 无 | 每 Agent 一份滚动结构化记忆，落盘可审计 |
+| 心智理论 | 无测量 | 每个时代开始前**显式预测最终六人排名**，Kendall τ / MAE 计分 |
+| 随机性 | `Math.random()` | **`GAME_SEED` 可复现**：时代顺序、项目发牌、派生局种子 |
+| 实验管理 | 手工点 | `npm run experiment`：条件清单、N 局、manifest、归档、汇总 CSV |
+| 成本 | 只有超时 | **每 Agent 每局 token 上限**，超限终止本局 |
+| 观察盲区 | 玩家能看到他人 Agent 人格/模型 | 玩家视角**隐藏** `agentIndex/agentModel/agentProvider` |
+| 导出 | 11 个原始表 | 增加 **指标、私聊、预测、Agent决策、指标汇总** |
+| 管理员分析 | 只有原始记录 | 历史场次内直接看**条件/种子/模型/指标/预测评分** |
 
 ---
 
@@ -24,22 +33,17 @@
 
 **是：**
 
-- 一个可本地运行的多智能体社会博弈实验台。
-- 6 个 Agent 各自持有独立 Socket 连接、独立上下文、独立配置，进入同一个房间对局。
-- 管理端保留上帝视角：看局面、控场（开局 / 跳阶段 / 拍卖 / 计时）、导出 JSON + XLSX。
+- 一个可复现、可审计的多 Agent 社会博弈实验台。
+- 6 个 Agent 各自持有独立 Socket 连接、独立上下文、独立记忆文件，进入同一房间。
+- 一局 8 轮，含 3 场拍卖；玩家间可公开聊天、私聊、转账、使用干扰卡。
+- 管理端保留上帝视角：看局面、看预测与决策、控场、导出 JSON + XLSX。
 
 **不是：**
 
-- 不是面向人类玩家的线上版本；玩家端源码虽然保留，但构建产物只有 `admin.html`。
+- 不是面向人类玩家的线上版本；玩家端源码保留，但构建产物只有 `admin.html`。
 - 不是多实例生产服务；服务端状态在内存、归档文件非多进程安全，**只能单实例运行**。
-- 不替代父仓库。父仓库仍是线上版本的唯一真相；本目录用于实验与课程 Demo。
-
-与父仓库的主要差异：
-
-- 新增 `agents/`（Agent 运行时）与根目录一键脚本。
-- 服务端增加 `agentRegister`、Agent 元数据字段与导出列。
-- 前端构建入口只保留管理端。
-- 未包含父仓库中的「规则讲解员」与旧 `server/ai` 自动调参模块。
+- 不是「模型能力排行榜」。它测量的是特定规则、特定提示词、特定模型在局中的行为签名。
+- 不使用规则策略兜底。**没有 LLM，就没有这一局。**
 
 ---
 
@@ -47,23 +51,37 @@
 
 ```text
 agent-edition/
-├─ .env / .env.example        # 根配置：ADMIN_TOKEN、6 个 Agent Key、节奏参数
-├─ package.json               # setup / dev / build / start 一键脚本
-├─ scripts/                   # 进程编排与构建
-├─ agents/                    # Agent 运行时
-│  ├─ agents.config.json      # 6 名 Agent 的姓名 / 人格 / 风格 / 风险偏好
+├─ .env / .env.example        # 根配置：ADMIN_TOKEN、6 个 Agent 的 Key/端点/模型、实验参数
+├─ package.json               # setup / dev / build / start / experiment
+├─ scripts/
+│  ├─ experiment.mjs          # 实验运行器：N 局、manifest、归档、summary.csv
+│  ├─ analyze.mjs             # 批量分析：dataset / condition_summary / prediction_by_era
+│  ├─ mock-llm.mjs            # 仅用于冒烟测试的 OpenAI 兼容 mock
+│  ├─ dev.mjs / start.mjs     # 本地开发 / 构建后运行
+│  └─ process.mjs             # 子进程与 killTree
+├─ agents/                    # Agent 运行时（所有 Agent 同一套 harness）
+│  ├─ agents.config.json      # 只有编号与中性名称，不含人格
 │  └─ src/
-│     ├─ orchestrator.ts      # 建房、自动开局、主持拍卖、自动重开
-│     ├─ agentClient.ts       # 单个 Agent 的连接、观察、决策、提交
-│     ├─ policy.ts            # 无 Key / 调用失败时的内置策略
-│     ├─ prompts.ts           # 系统提示词与各阶段提示词
-│     ├─ observation.ts       # 从 gameUpdate 裁剪出「自己的视角」
-│     └─ llm.ts               # OpenAI 兼容调用与 JSON 解析
-├─ server/                    # 游戏服务端（规则、阶段、存档、导出）
-├─ frontend/                  # 管理端 admin.html（玩家端源码保留但不构建）
-├─ logs/                      # Agent 运行日志（gitignore）
+│     ├─ orchestrator.ts      # 建房、自动开局、拍卖控场、局数控制
+│     ├─ agentClient.ts       # 连接、观察、决策、聊天、预测、记忆更新
+│     ├─ memory.ts            # 每 Agent 的结构化滚动记忆（JSONL 落盘）
+│     ├─ prompts.ts           # 统一中立提示词 + 不可信聊天包装
+│     ├─ llm.ts               # 重试、超时、token 预算、失败即终止
+│     └─ observation.ts       # 从 gameUpdate 裁剪出「自己的视角」
+├─ server/                    # 游戏服务端（规则、阶段、聊天、预测、导出）
+│  ├─ analysis/metrics.ts     # 社会指标与预测评分
+│  ├─ logic/directMessages.ts # 一对一私聊
+│  ├─ logic/chatQuota.ts      # 每轮聊天配额
+│  ├─ config/experiment.ts    # 实验元数据
+│  ├─ utils/rng.ts            # 可复现随机数
+│  └─ export/sessionExport.ts # JSON / 16 表 XLSX
+├─ frontend/                  # 管理端 admin.html
+├─ experiments/<runId>/       # 每次实验的 manifest / sessions.json / summary.csv
+├─ logs/                      # Agent 日志与 memory/<runId>/agent-n-*.jsonl
+├─ 实验手册.md                # 条件、流程、分析计划、检查清单
+├─ 数据字典.md                # 导出字段与指标定义
 ├─ 初步计划.docx              # 原始立项计划
-└─ 计划修改.md                # 基于现状修订后的计划
+└─ 计划修改.md                # 基于现状修订后的研究计划
 ```
 
 ---
@@ -72,63 +90,116 @@ agent-edition/
 
 ```text
 ┌──────────────────── agents/ ────────────────────┐
-│  AgentClient #1 … #6                            │
-│  各自 socket / 上下文 / 配置                     │
+│  Agent 1 … Agent 6                              │
+│  各自 socket / 上下文 / 记忆文件 / 模型配置      │
+│  同一套 prompt、同一套能力开关、同一温度         │
 └───────────────┬─────────────────────────────────┘
                 │ joinGame / playerReady / submitInvestment
-                │ createTransaction / playerPlaceAuctionBid …
+                │ sendGroupMessage / sendDirectMessage
+                │ submitPrediction / agentDecision
                 ▼
         ┌───────────────────┐         ┌──────────────────────────┐
         │   Game Server     │◄───────►│  Orchestrator（主持）     │
         │  阶段 / 规则 /     │  admin  │  自动开局 / 拍卖控场 /    │
-        │  归档 / 导出       │  socket │  自动重开                 │
+        │  聊天 / 预测 / 导出 │  socket │  局数控制 / 失败终止      │
         └─────────┬─────────┘         └──────────────────────────┘
                   │ gameUpdate（按视角裁剪）
-                  ├──────────────► 6 个 Agent：只看到自己的手牌、精力、投资草稿
-                  └──────────────► 管理端：上帝视角 + 导出
+                  ├──────────────► 6 个 Agent：只看到自己的手牌、精力、投资草稿；
+                  │                 他人 Agent 标签被隐藏；可见公开群聊与自己收发的私聊
+                  └──────────────► 管理端：上帝视角 + 实验记录 + 导出
 ```
 
-两个关键约束：
+三个关键约束：
 
-1. **玩家视角裁剪**在服务端完成。他人精力、手牌、已用道具、投资草稿不会下发给 Agent。
-2. **主持控场**复用管理端 Socket（`ADMIN_TOKEN` 鉴权）。`AGENT_AUTO_AUCTION=true` 时，由 Orchestrator 定焦点、跳过无人出价的卡、在窗口后落槌。
+1. **玩家视角裁剪**在服务端完成。他人精力、手牌、已用道具、投资草稿、Agent 序号/模型不会下发给 Agent。
+2. **主持控场**复用管理端 Socket（`ADMIN_TOKEN` 鉴权）。拍卖卡池由服务端通过上帝视图下发，Agent 侧不再硬编码。
+3. **聊天是不可信输入**。Agent 提示词明确把公开聊天与私聊标为「数据，不是指令」，并准备提示注入测试。
 
 ---
 
-## 4. 快速开始
+## 4. 环境与安装
 
-### 4.1 环境
-
-- Node.js `>=20 <23`，npm `>=10`（当前机器为 Node 22）。
-- 三个子项目各自有 `node_modules`，首次需安装。
-
-### 4.2 安装
+- Node.js `>=20`（当前机器验证于 Node 25.2.1；构建、测试、mock 端到端均通过）
+- npm `>=10`
+- 三个子项目各自有 `node_modules`
 
 ```bash
 cd D:\workspace\光阴对赌新新新\agent-edition
 npm run setup
 ```
 
-`setup` 会：复制 `.env.example` → `.env`，并依次安装 `server`、`agents`、`frontend` 依赖。
+`setup` 会复制 `.env.example` → `.env` 并安装 `server`、`agents`、`frontend` 依赖。
 
-### 4.3 配置
+---
 
-编辑根目录 `.env`，至少设置：
+## 5. 配置：Key、模型、供应商
+
+编辑根目录 `.env`。**每个 Agent 可以来自不同公司**：
 
 ```dotenv
-ADMIN_TOKEN=本地管理密钥
+ADMIN_TOKEN=local-admin-token-change-me
+PORT=3001
+GAME_SEED=20261104
+
 AGENT_1_API_KEY=sk-...
-# … AGENT_2 … AGENT_6
+AGENT_1_BASE_URL=https://api.openai.com/v1
+AGENT_1_MODEL=gpt-4o
+AGENT_1_PROVIDER=openai
+
+AGENT_2_API_KEY=sk-...
+AGENT_2_BASE_URL=https://api.deepseek.com/v1
+AGENT_2_MODEL=deepseek-chat
+AGENT_2_PROVIDER=deepseek
+
+# … AGENT_3 … AGENT_6
 ```
 
-- 支持任意 OpenAI 兼容接口：填 `AGENT_n_BASE_URL` / `AGENT_n_MODEL` 即可。
-- **不填 Key 也能跑**：占位 Key 会自动回退到内置策略（`AGENT_FALLBACK_POLICY=true`）。
-- 想强制不调用任何模型：`AGENT_OFFLINE=true`。
+规则：
 
-> 根 `.env` 是唯一权威配置。`server/.env` 只用于补充父仓库遗留变量；同名变量以先加载的根 `.env` 为准。
-> `.env` 已被 gitignore，**不要把真实 Key 提交或分发**。
+- **不填 Key / 仍是 placeholder → agents 启动时直接报错退出**，不会跑出一局假数据。
+- `AGENT_n_BASE_URL` 不填时使用 OpenAI 官方；`AGENT_n_MODEL` 不能为空。
+- `AGENT_n_PROVIDER` 只用于导出与 manifest；不填时从 BASE_URL 主机名推断。
+- 所有 Agent 使用同一个 `AGENT_TEMPERATURE`。不要给单个 Agent 单独设温度，否则 harness 不再一致。
+- `AGENT_TOKEN_BUDGET` 是每 Agent 每局上限；超限终止本局。
+- `AGENT_MAX_RETRIES` 是网络/JSON 重试次数；重试耗尽仍失败 → 终止本局。
 
-### 4.4 开发模式
+完整变量见 `.env.example`。
+
+---
+
+## 6. 怎么跑
+
+### 6.1 冒烟测试（不需要真实 Key）
+
+```bash
+npm run experiment -- --mock --games 1 --condition smoke
+```
+
+它启动一个本地 OpenAI 兼容 mock，只验证「连接 → 提示词 → JSON → 动作 → 聊天 → 预测 → 结算 → 导出」链路。
+**mock 数据不能用于研究。**
+
+### 6.2 正式实验
+
+```bash
+# 例：C1 沟通条件，5 局，固定种子
+npm run experiment -- --condition C1 --games 5 --seed 20261104
+
+# 例：C0 基线（关闭聊天）
+npm run experiment -- --condition C0 --games 5 --seed 20261104 --no-chat
+
+# 例：混模型条件（在 .env 里给 6 个 Agent 配不同供应商/模型）
+npm run experiment -- --condition C2 --games 3 --seed 20261104
+```
+
+运行器会：
+
+1. 构建三端（可加 `--no-build` 跳过）；
+2. 生成 `experiments/<runId>/manifest.json`（条件、种子、模型、提示词版本、git commit、token 预算等）；
+3. 启动 server + agents，自动跑 N 局；
+4. 结束后把本次 run 的归档写入 `sessions.json`，并生成 `summary.csv`；
+5. 任一 Agent 模型失败 → 退出码 2，本局标记失败，不继续。
+
+### 6.3 交互式本地运行
 
 ```bash
 npm run dev
@@ -139,165 +210,140 @@ npm run dev
 | `http://localhost:5173/admin.html` | 管理端（Vite 热更新） |
 | `http://127.0.0.1:3001` | 服务端 API / Socket |
 
-登录密钥 = `.env` 里的 `ADMIN_TOKEN`。
+登录密钥 = `.env` 里的 `ADMIN_TOKEN`。没有真实 Key 时 agents 会直接退出，这是预期行为。
 
-### 4.5 构建后本地运行
+### 6.4 构建后运行
 
 ```bash
 npm run build
 npm start
 ```
 
-管理端由服务端直接托管：`http://localhost:3001/admin.html`。
+管理端由服务端托管：`http://localhost:3001/admin.html`。
 
-### 4.6 无 Key 演示
+### 6.5 批量分析
 
 ```bash
-# 保持 Key 为占位即可；或在 .env 里
-AGENT_OFFLINE=true
-npm run dev
+# 汇总所有 experiments 下的数据
+npm run analyze
+
+# 只分析某个 run
+npm run analyze -- --run finalcheck-424242-2026-11-04_03-40-18-687
+
+# 排除 mock 数据，输出到指定目录
+npm run analyze -- --exclude-mock --out analysis/2026-11-04
 ```
 
-6 个内置策略 Agent 会按人格偏好投资、出价、转账并完成整局。
+输出：
+
+- `dataset.csv`：每局每玩家一行；
+- `condition_summary.csv`：每条件均值 + 局内分化；
+- `prediction_by_era.csv`：按时代的预测 τ/MAE；
+- `summary.json`：机器可读汇总。
+
+`dataset.csv` 可直接导入 R/Python 做 bootstrap、混合效应模型或绘图。
 
 ---
 
-## 5. 配置速查
-
-| 变量 | 默认 | 说明 |
-|------|------|------|
-| `ADMIN_TOKEN` | — | 管理端登录密钥；同时用于 Orchestrator 自动开局/拍卖 |
-| `PORT` | `3001` | 服务端端口 |
-| `AGENT_ROOM_ID` | `agent-arena` | 6 个 Agent 共用的房间号 |
-| `AGENT_SERVER_URL` | `http://127.0.0.1:3001` | Agent 连接地址 |
-| `AGENT_n_API_KEY` | 占位 | 第 n 个 Agent 的 Key；占位时回退内置策略 |
-| `AGENT_n_BASE_URL` | 空 | 单个 Agent 的 OpenAI 兼容端点 |
-| `AGENT_n_MODEL` | `gpt-4o` | 单个 Agent 的模型 |
-| `AGENT_TEMPERATURE` | `0.7` | 采样温度 |
-| `AGENT_AUTO_START` | `true` | 6 人就座后自动开局 |
-| `AGENT_AUTO_RESTART` | `false` | 一局结束后 10 秒自动开下一局 |
-| `AGENT_AUTO_AUCTION` | `true` | 由 Orchestrator 自动主持拍卖 |
-| `AGENT_FALLBACK_POLICY` | `true` | 调用失败时是否回退内置策略 |
-| `AGENT_OFFLINE` | `false` | 强制只用内置策略 |
-| `AGENT_DECISION_TIMEOUT_MS` | `90000` | 单次模型调用超时 |
-| `AGENT_ACTION_DELAY_MIN/MAX_MS` | `700 / 2200` | 拟人延迟范围 |
-| `AGENT_AUCTION_PASS_WINDOW_MS` | `45000` | 无人出价多久后跳过 |
-| `AGENT_AUCTION_HAMMER_WINDOW_MS` | `18000` | 最后一口后多久落槌 |
-| `AGENT_AUCTION_MAX_DECISIONS` | `3` | 单个 Agent 在同一张卡上的最多决策次数 |
-
-6 名 Agent 的姓名、人格、风格、拍卖预算比例、风险偏好：`agents/agents.config.json`。
-
----
-
-## 6. 一局怎么走
+## 7. 一局怎么走
 
 1. 服务端启动，Orchestrator 以管理身份连接并鉴权。
-2. 6 个 Agent 用 `AGENT_ROOM_ID` 加入同一房间；房间不存在时自动创建。
-3. 6 人全部就座后，Orchestrator 自动开局（`AGENT_AUTO_START`）。
+2. 6 个 Agent 用 `AGENT_ROOM_ID` 加入同一房间；全 Agent 房间按 `agentIndex` 固定座位。
+3. 6 人全部就座后，Orchestrator 自动开局。
 4. 每个时代 2 轮：
-   - `ERA_INTRO`（读时代卡，全员准备）
-   - `INVESTMENT`（含道具与咖啡；全员提交/锁定后立即结算）
-   - `SETTLEMENT`（全员准备后进入下一轮或拍卖）
+   - `ERA_INTRO`：Agent 先提交**最终排名预测**，再准备；
+   - `INVESTMENT`：Agent 可发公开消息/私聊、转账、买咖啡、用道具、提交投资；
+   - `SETTLEMENT`：结算，Agent 把本轮结果写入记忆并准备。
 5. 时代 2、3、4 开始前各有一场拍卖（共 3 场）。
-6. 4 个时代 × 2 轮 = **8 个全局轮**，随后 `COMMUNITY_NAMING`（当前首富命名）→ `GAME_OVER`。
-7. `AGENT_AUTO_RESTART=true` 时，10 秒后自动开下一局。
+6. 4 个时代 × 2 轮 = **8 个全局轮**，随后 `COMMUNITY_NAMING`（在线首富命名）→ `GAME_OVER`。
+7. `AGENT_AUTO_RESTART=true` 时自动开下一局；`AGENT_GAME_LIMIT` 控制总局数。
 
-投资倒计时：首轮 12 分钟，其余 10 分钟；**全员就绪会立即推进**，不必等满。
-
-> 引擎内部 `eraSequence` 有 5 张时代卡，但 `currentEra > 4` 即结束，因此第 5 个时代当前不会被玩到。
+> 引擎的时代序列只取 4 张时代卡；第 5 张不会进入对局，避免「抽了但永远玩不到」。
+> 第 4 时代第 2 轮结算后直接进入命名，`globalRound` 保持 8，不会出现第 9 轮。
 
 ---
 
-## 7. 数据与导出
+## 8. 数据与导出
 
-### 7.1 管理端导出
+### 8.1 从哪里导出
 
-- **进行中房间**：房间页 →「导出数据」→ 先 JSON，再点一次导出 Excel。
-- **已完成场次**：管理端「场次记录」→ 选择场次 → 导出 JSON / XLSX；也可标记剔除（移出社区财富榜）。
+- **进行中房间**：管理端房间页 →「导出数据」→ JSON / XLSX。
+- **已完成场次**：管理端「场次记录」→ 选择场次 → 导出 JSON / XLSX；详情面板内还有「实验分析」。
+- 接口均需 `ADMIN_TOKEN`。
 
-导出接口均需 `ADMIN_TOKEN`。
+### 8.2 XLSX 工作表（16 个）
 
-### 7.2 XLSX 工作表
+`概览`、`玩家`、`指标汇总`、`指标`、`事件`、`结算`、`转账`、`群聊`、`私聊`、`预测`、`Agent决策`、`项目`、`出价明细`、`成交`、`出价摘要`、`彩票`。
 
-`概览`、`玩家`、`事件`、`结算`、`转账`、`群聊`、`项目`、`出价明细`、`成交`、`出价摘要`、`彩票`。
+关键列：
 
-Agent 专属列：`Agent`、`Agent序号`、`Agent人格`、`Agent模型`。
+- **概览**：`sessionId`、`condition`、`seed`、`runId`、`models`、`promptVersion`、`promptHash`、`experiment`。
+- **指标**：每名玩家的财富/名次、长期/短期/风险占比、转账收发与回报率、公开/私聊条数、拍卖次数/花费、干扰次数、预测 τ/MAE、出度/入度。
+- **预测**：每条预测的排名、理由、Kendall τ、名次 MAE。
+- **Agent决策**：每次 LLM 决策的类型、推理、动作、模型、token、延迟。
+- **私聊**：发送者、接收者、内容、轮次；与转账分开，避免把 0 元转账当私聊。
 
-> 群聊表当前为空，因为群聊开关 `GROUP_CHAT_ENABLED=false`；且 Agent 尚未实现发言。
-
-### 7.3 落盘位置
+### 8.3 落盘位置
 
 | 数据 | 位置 | 是否提交 |
 |------|------|----------|
 | 已完成场次归档 | `server/data/session_archive.json` | 否 |
-| Agent 运行日志 | `logs/agents-*.jsonl`、`logs/smoke-*.log` | 否 |
+| 实验 run | `experiments/<runId>/` | 否 |
+| Agent 运行日志 | `logs/agents-*.jsonl` | 否 |
+| Agent 记忆 | `logs/memory/<runId>/agent-n-*.jsonl` | 否 |
 | 管理端构建 | `frontend/dist/` | 否 |
 
 归档是已完成场次的唯一持久化真相；进行中的房间只在内存，服务重启即消失。
 
-### 7.4 Agent 决策记录现状
+> mock 场次会在管理端显示 `MOCK` 徽标；正式分析请用 `npm run analyze -- --exclude-mock` 排除。
 
-- `logs/agents-*.jsonl` 会记录每次投资方案（含 `reasoning`）、出价、转账接受/拒绝、阶段变化。
-- 这些**不在** JSON/XLSX 导出里；导出目前只有服务端事件与游戏状态。
-- 提示词、原始模型输出、token 用量尚未进入结构化记录，只有 `llm.ts` 的成功/失败日志。
+### 8.4 数据原则
 
-数据原则与父仓库保持一致：只记可核对的事实，不在留存阶段写推断型标签。详见 `../数据留存与导出说明.md` 与 `../追踪数据清单.md`。
+- 原始行为与派生指标分开：`transactions / groupMessages / directMessages / predictions / agentDecisions` 是事实；`metrics` 是派生。
+- 不在采集阶段写「角色标签」。规则引擎生成的「命运素描/决策基因」只是分析标签，不是事实，也不应反推现实人格。
+- 聊天内容导出前做敏感词掩码；研究展示时仍需匿名化。
+
+详见 [`数据字典.md`](./数据字典.md)。
 
 ---
 
-## 8. 当前完成度（2026-11-04 审计）
+## 9. 当前完成度（2026-11-04）
 
-### 已可用
+### 已实现并验证
+
+| 能力 | 状态 |
+|------|------|
+| 6 Agent 同房、8 轮、3 场拍卖、命名、结束 | ✅ mock 端到端 2 局通过 |
+| 严格 LLM-only、缺 Key 报错、失败终止 | ✅ 已用 mock 500 验证退出码 2 |
+| 同一 harness、无预置人格 | ✅ 配置与提示词已统一 |
+| 公开群聊 + 一对一私聊 | ✅ 每局 48 条公开 + 24 条私聊（mock） |
+| 结构化记忆 | ✅ `logs/memory/<runId>/agent-n-*.jsonl` |
+| 每时代排名预测 | ✅ 每局 24 条（6 Agent × 4 时代） |
+| 可复现种子 | ✅ 同 seed 派生局种子、时代顺序、项目发牌 |
+| 实验 manifest / N 局 / summary.csv | ✅ |
+| token 预算 | ✅ 超限终止 |
+| 玩家视角隐藏 Agent 标签 | ✅ |
+| 管理员分析视图 | ✅ 条件/种子/模型/指标/预测评分 |
+| 服务端测试 | ✅ 262 / 262 |
+| 三端构建 | ✅ |
+
+### 仍需真实 Key 验证
 
 | 能力 | 说明 |
 |------|------|
-| 6 Agent 同房对局 | 独立连接、独立玩家视角、独立配置 |
-| 全流程推进 | 投资、道具、咖啡、结算、拍卖、命名、游戏结束 |
-| 自动主持 | 自动开局、拍卖定焦点/跳过/落槌、可选自动重开 |
-| 断线重连 | Agent 保存 `reconnectToken`；重复进程会触发设备认领提示 |
-| 管理端 | 登录、观战、开局、跳阶段、计时、踢人、导出 |
-| 导出 | JSON + 11 个工作表的 XLSX |
-| 内置策略 | 无 Key 也能完局，按人格偏好行动 |
-| 工程健康 | 三端可编译；服务端 251 个测试全通过 |
+| 真实模型 JSON 稳定性 | 不同供应商对 `response_format` 支持不同；已做重试与语义校验，但需实测失败率 |
+| 真实模型延迟/成本 | mock 的 token 数只用于链路验证 |
+| 真实社会行为 | mock 数据不能用于研究结论 |
 
-### 部分完成 / 未验证
+### 已知限制
 
-| 能力 | 状态 | 缺口 |
-|------|------|------|
-| LLM 决策 | ⚠️ 未验证 | Key 为占位；真实模型下的 JSON 稳定性、延迟、成本未知 |
-| 混合模式 | ⚠️ 部分 | `AGENT_OFFLINE` 是全局开关，不能「3 个规则 + 3 个 LLM」 |
-| 转账 | ✅ 可用 | 接受转账无成本，作为「信任」指标偏弱 |
-| 拍卖主持 | ⚠️ 可用但脆弱 | 卡池在 `orchestrator.ts` 中硬编码，与服务端逻辑重复，易漂移 |
-| 数据导出 | ✅ 原始数据丰富 | 没有计算后的社会指标 |
-
-### 尚未实现
-
-| 能力 | 影响的计划部分 |
-|------|----------------|
-| 公开 / 私聊发言 | 沟通、说服、欺骗、承诺兑现、联盟 |
-| 跨轮记忆与复盘 | 声誉、报复、路径依赖、适应 |
-| 对手模型 / 意图预测 | 心智理论 RQ、预测准确率 |
-| 承诺与联盟记录 | 合作率、联盟持续时间、背叛 |
-| 社会网络与指标计算 | 关系结构、中心度、角色视图 |
-| 固定随机种子 | 可复现实验、同种子重复 |
-| 实验清单 / 批量运行 | 多条件对比、重复多局 |
-| Token / 成本预算 | 成本风险控制 |
-| 玩家视角隐藏 Agent 人格 | 角色涌现研究的混淆控制 |
-
----
-
-## 9. 已知限制与风险
-
-1. **LLM 路径未实测**：当前所有端到端结论都来自内置策略，不能当作「LLM 社会行为」的证据。
-2. **人格提示词会污染「角色涌现」**：Agent 一开始就被写成「长期主义者 / 精算师」，观察到的差异可能只是指令遵循。研究上必须加入中立人格条件。
-3. **没有沟通**：计划中大量指标（承诺、欺骗、联盟、说服）目前无法计算。
-4. **没有记忆**：每轮决策只看当前快照 + 最近 12 条日志，不存在跨轮声誉或报复。
-5. **不可复现**：项目抽卡、时代顺序、拍卖顺序都走 `Math.random()`，没有种子。
-6. **信息泄漏**：玩家 `gameUpdate` 里仍带其他 Agent 的 `agentPersona` / `agentModel`，可能让 Agent 直接知道对手设定。
-7. **主持逻辑重复**：Orchestrator 自己维护一份拍卖卡池与轮次映射，服务端规则变更时容易不同步。
-8. **单实例限制**：内存态房间 + 单文件归档，不能开 cluster。
-9. **安全边界**：目前 Agent 之间没有自由文本，提示注入面很小；一旦打开聊天，必须把消息当作不可信输入处理。
-10. **第 5 时代未使用**：`eraSequence` 抽了 5 张，但流程在第 4 时代后结束。
+1. **单实例**：内存态房间 + 单文件归档，不能开 cluster。
+2. **样本量**：每局 n=6，跨局稳定性需要多局；不要做「发现 N 种角色」的强结论。
+3. **无跨局记忆**：记忆只在单局内滚动；跨局学习是后续工作。
+4. **无结构化联盟/合同**：承诺、联盟只能从聊天与行为事后编码。
+5. **无独立回放 UI**：JSON 事件流可还原，UI 回放未做。
+6. **聊天是攻击面**：已做不可信输入包装与长度/频率限制，但仍需持续做注入测试。
+7. **模型采样差异**：固定种子只能复现结构性随机，不能复现模型采样；同条件多局是必要的。
 
 ---
 
@@ -305,30 +351,31 @@ Agent 专属列：`Agent`、`Agent序号`、`Agent人格`、`Agent模型`。
 
 | 现象 | 排查 |
 |------|------|
-| 3001 端口被占用 | `Get-NetTCPConnection -LocalPort 3001`；先结束旧的 node 进程 |
-| 管理端登录一直「验证超时」 | 检查 `ADMIN_TOKEN` 是否与根 `.env` 一致；服务端是否已重新构建 |
-| Agent 都连上但不开局 | `ADMIN_TOKEN` 为空/不一致，或 `AGENT_AUTO_START=false`；看 `logs/agents-*.jsonl` |
-| 拍卖卡住 | `AGENT_AUTO_AUCTION=false` 或 Orchestrator 掉线；可在管理端手动定焦点/落槌 |
-| 所有 Agent 都像「内置策略」 | Key 仍是占位，或 `AGENT_OFFLINE=true`；看启动日志的 Key 状态 |
-| 出现 `deviceClaimPending` | 可能重复启动了 agents 进程；先杀掉旧进程再启动 |
-| 上一进程被强杀后端口仍占用 | `taskkill /PID <pid> /T /F` |
-| 想看 Agent 到底做了什么 | `logs/agents-<时间>.jsonl`（每次运行一个文件） |
+| `API Key 未填写或仍是占位值` | 这是预期行为：填 `.env` 的 6 个 Key；或先用 `--mock` 冒烟 |
+| `AGENT_DEFAULT_MODEL` 为空 | 设置 `AGENT_DEFAULT_MODEL` 或每个 `AGENT_n_MODEL` |
+| 实验退出码 2 | 模型调用失败/输出语义无效/token 超限；看 `logs/agents-*.jsonl` |
+| 退出码 3 | 完成的局数少于请求局数；看 `experiments/<runId>/run.json` |
+| 3001 端口被占用 | `Get-NetTCPConnection -LocalPort 3001`；先结束旧 node 进程 |
+| 管理端登录超时 | 检查 `ADMIN_TOKEN` 是否与根 `.env` 一致；服务端是否已构建 |
+| 拍卖卡住 | Orchestrator 未连上管理端，或 `ADMIN_TOKEN` 不一致；看 agent 日志 |
+| 想看 Agent 到底做了什么 | `logs/agents-<时间>.jsonl` 与 `logs/memory/<runId>/` |
+| 想看某局的完整数据 | 管理端场次记录 → 详情 → 导出 JSON/XLSX / 实验分析 |
 
 ---
 
 ## 11. 开发约定
 
 - **父目录只读**：本目录可写；`../frontend`、`../server` 等父仓库文件不要改。
-- **不提交**：`.env`、`logs/`、`server/data/session_archive.json`、各 `dist/`。
-- **Node 版本**：`>=20 <23`，与 `package.json` 的 `engines` 保持一致。
+- **不提交**：`.env`、`logs/`、`experiments/`、`server/data/session_archive.json`、各 `dist/`。
+- **Node 版本**：`>=20`。
 - **服务端单实例**：不要用 `pm2 -i max`。
 - **改动后至少跑**：
 
 ```bash
-npm --prefix server run build
-npm --prefix agents run build
 npm --prefix server test
+npm --prefix agents run build
 npm --prefix frontend run build
+npm run experiment -- --mock --games 1 --condition smoke --no-build
 ```
 
 ---
@@ -337,12 +384,13 @@ npm --prefix frontend run build
 
 | 文档 | 内容 |
 |------|------|
+| [`实验手册.md`](./实验手册.md) | 研究问题、条件、流程、样本量、分析计划、检查清单 |
+| [`数据字典.md`](./数据字典.md) | 导出字段、事件类型、指标定义、分析建议 |
+| [`计划修改.md`](./计划修改.md) | 对原立项计划的逐条质疑与修订 |
 | [`初步计划.docx`](./初步计划.docx) | 原始立项计划（第 9 周） |
-| [`计划修改.md`](./计划修改.md) | 基于现有原型的修订计划：质疑了哪些安排、为什么改、改成什么 |
 | `../README.md` | 父仓库（线上版本）运行与部署说明 |
 | `../数据留存与导出说明.md` | 数据原则：只记事实、不写推断标签 |
 | `../追踪数据清单.md` | 当前已采集 / 待补的数据项 |
-| `../产品演进方向.md` | 后续可能方向 |
 
 ---
 

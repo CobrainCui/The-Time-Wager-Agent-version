@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { AnalysisWeights, FateSketchThresholds } from "../logic/analysisLogic.js";
 
-export const EXPORT_SCHEMA_VERSION = "1.2.0";
+export const EXPORT_SCHEMA_VERSION = "1.3.0";
 
 export function getAnalysisWeightsVersion(): string {
   const json = JSON.stringify({ AnalysisWeights, FateSketchThresholds });

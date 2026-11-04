@@ -45,6 +45,68 @@ export interface GroupMessage {
   clientTempId?: string;
 }
 
+export interface DirectMessage {
+  id: string;
+  fromId: string;
+  fromName: string;
+  toId: string;
+  toName: string;
+  text: string;
+  timestamp: number;
+  era: number;
+  roundInEra: number;
+  globalRound: number;
+  clientTempId?: string;
+}
+
+export interface AgentPrediction {
+  id: string;
+  playerId: string;
+  playerName: string;
+  era: number;
+  globalRound: number;
+  ranking: string[];
+  reasoning: string;
+  timestamp: number;
+  model?: string;
+}
+
+export interface AgentDecision {
+  id: string;
+  playerId: string;
+  playerName: string;
+  kind: string;
+  phase: Phase;
+  era: number;
+  roundInEra: number;
+  globalRound: number;
+  reasoning: string;
+  action: unknown;
+  model?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  latencyMs?: number;
+  timestamp: number;
+}
+
+export interface ExperimentMeta {
+  runId: string | null;
+  condition: string | null;
+  seedBase: number;
+  seed: number;
+  sessionOrdinal: number;
+  manifestId: string | null;
+  manifestPath: string | null;
+  promptVersion: string | null;
+  promptHash?: string | null;
+  mock?: boolean;
+  policyMode: string;
+  gitCommit: string | null;
+  nodeVersion: string;
+  serverStartedAt: number;
+}
+
 export interface ActiveProject {
   id: number;
   name: string;
@@ -190,6 +252,10 @@ export interface Player {
 
   isAI?: boolean;
   aiPersona?: string;
+  isAgent?: boolean;
+  agentIndex?: number;
+  agentModel?: string;
+  agentProvider?: string;
 }
 
 export interface EventOption {
@@ -261,6 +327,15 @@ export interface GameState {
   transactions: Transaction[];
   chatGroups?: ChatGroup[];
   groupMessages?: GroupMessage[];
+  directMessages?: DirectMessage[];
+  predictions?: AgentPrediction[];
+  agentDecisions?: AgentDecision[];
+  experiment?: ExperimentMeta | null;
+  seed?: number | null;
+  seedBase?: number | null;
+  sessionOrdinal?: number;
+  /** 上帝视角：本场拍卖卡池（服务端下发） */
+  auctionPoolCardIds?: string[];
   /** 本场可见私信/转账归档元数据（热尾之外是否还有更早记录） */
   transactionLog?: { total: number; hasMore: boolean };
   /** 主持当前是否处于某玩家只读视角（仅管理端下发） */

@@ -46,6 +46,7 @@ import {
 } from "./state/sessionArchive.js";
 
 assertAdminTokenConfigured();
+process.env.SERVER_STARTED_AT = process.env.SERVER_STARTED_AT || String(Date.now());
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -331,6 +332,38 @@ app.get("/api/admin/sessions/:sessionId", requireAdminToken, (req, res) => {
   res.json(detail);
 });
 
+/** 实验室分析视图：元数据 + 指标 + 预测 + 通信 + Agent 决策。 */
+app.get("/api/admin/sessions/:sessionId/analysis", requireAdminToken, (req, res) => {
+  const sessionId = String(req.params.sessionId ?? "").trim();
+  if (!sessionId) {
+    res.status(400).json({ error: "Missing sessionId" });
+    return;
+  }
+  const snapshot = getSessionSnapshot(sessionId);
+  if (!snapshot) {
+    res.status(404).json({ error: "Snapshot not found for this session" });
+    return;
+  }
+  res.json({
+    meta: snapshot.meta,
+    metrics: snapshot.metrics,
+    predictions: snapshot.predictions,
+    directMessages: snapshot.directMessages,
+    groupMessages: snapshot.groupMessages,
+    agentDecisions: snapshot.agentDecisions,
+    players: snapshot.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      isAgent: p.isAgent,
+      agentIndex: p.agentIndex,
+      agentModel: p.agentModel,
+      agentProvider: p.agentProvider,
+      wealth: p.wealth,
+      rank: p.rank,
+    })),
+  });
+});
+
 app.post("/api/admin/sessions/:sessionId/void", express.json(), requireAdminToken, (req, res) => {
   const sessionId = String(req.params.sessionId ?? "").trim();
   if (!sessionId) {
@@ -458,7 +491,7 @@ const io = new Server(server, {
 
 setGameIo(io);
 
-const PORT = 3001;
+const PORT = Number(process.env.PORT) || 3001;
 
 io.on("connection", (socket) => {
   registerSocketHandlers(io, socket);

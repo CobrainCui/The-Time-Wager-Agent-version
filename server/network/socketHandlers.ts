@@ -111,6 +111,7 @@ import {
   syncChatGroupsOnRosterChange,
 } from "../logic/chatGroups.js";
 import { GROUP_CHAT_DISABLED_MESSAGE, GROUP_CHAT_ENABLED } from "../config/playerChatFeatures.js";
+import { sendDirectMessage } from "../logic/directMessages.js";
 import { allow } from "../util/rateLimit.js";
 import { canCreateRoom } from "../logic/roomCreatePolicy.js";
 import {
@@ -118,6 +119,24 @@ import {
   ensureSessionStarted,
   recordPhaseChange,
 } from "../state/sessionTelemetry.js";
+
+/**
+ * 全 Agent 房间里，按 agentIndex 固定座位顺序，避免入座先后改变座位效应。
+ * 只要还有非 Agent 玩家或编号不全，就不排序。
+ */
+function normalizeAgentSeatOrder(game: GameState): void {
+  if (game.players.length !== 6) return;
+  if (!game.players.every((p) => p.isAgent === true && typeof p.agentIndex === "number")) return;
+  const indices = new Set(game.players.map((p) => p.agentIndex));
+  if (indices.size !== game.players.length) return;
+  game.players.sort((a, b) => (a.agentIndex ?? 0) - (b.agentIndex ?? 0));
+}
+
+function resetSessionAndChat(game: GameState): void {
+  resetGameSession(game);
+  // 新一局默认重新开放全场频道（实验版）
+  syncChatGroupsOnRosterChange(game);
+}
 
 function presencePayload(game: GameState, action: string, playerId: string) {
   return {
@@ -574,7 +593,7 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
 
     if (game.phase === "ROOM_WAITING") {
       if (needsSessionReset(game)) {
-        resetGameSession(game);
+        resetSessionAndChat(game);
       }
       const online = game.players.filter((p) => p.connected);
       if (online.length === 0) {
@@ -597,7 +616,7 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
         finishTutorialExit(game);
       }
       if (needsSessionReset(game)) {
-        resetGameSession(game);
+        resetSessionAndChat(game);
       }
 
       const prevPhase = game.phase;
@@ -913,13 +932,13 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
         const nextPhase = targetPhase as Phase;
         const prevPhase = game.phase;
         if (nextPhase === "ERA_INTRO" && needsSessionReset(game)) {
-          resetGameSession(game);
+          resetSessionAndChat(game);
           game.phase = "ERA_INTRO";
           applyRoundEnergy(game, { relock: true });
           resetAllReady(game);
           game.logs.push(`⏭️ 上帝强制跳转至 [${nextPhase}]（已重置局内状态）`);
         } else if (nextPhase === "ROOM_WAITING") {
-          resetGameSession(game);
+          resetSessionAndChat(game);
           resetAllReady(game);
           game.logs.push(`⏭️ 上帝强制跳转至 [${nextPhase}]（已重置局内状态）`);
         } else {
@@ -1427,7 +1446,7 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
   // 外部 agents 运行时加入后调用，把该连接标记为 Agent，供观察端与导出识别。
   // 注意：不设置 isAI，isAI 仅表示「由服务端自动托管的旧 Bot」；Agent 玩家照常参与
   // ready / 投资 / 拍卖等全部玩家流程。
-  socket.on("agentRegister", ({ agentIndex, persona, model }: { agentIndex?: number; persona?: string; model?: string }) => {
+  socket.on("agentRegister", ({ agentIndex, model, provider }: { agentIndex?: number; model?: string; provider?: string }) => {
     const roomId = getRoomId(socket);
     if (!roomId || !rooms[roomId]) return;
     const game = rooms[roomId];
@@ -1435,11 +1454,157 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
     if (!player) return;
     player.isAgent = true;
     if (typeof agentIndex === "number" && Number.isFinite(agentIndex)) {
-      player.agentIndex = Math.trunc(agentIndex);
+      const idx = Math.trunc(agentIndex);
+      if (idx >= 1 && idx <= 6) player.agentIndex = idx;
     }
-    if (typeof persona === "string") player.agentPersona = persona.slice(0, 40);
     if (typeof model === "string") player.agentModel = model.slice(0, 80);
+    if (typeof provider === "string") player.agentProvider = provider.slice(0, 80);
+    normalizeAgentSeatOrder(game);
     broadcastUpdate(io, game);
+  });
+
+  // Agent 在时代开始时的最终排名预测（心智理论测量）。
+  socket.on("submitPrediction", ({ era, ranking, reasoning, model }: {
+    era?: unknown;
+    ranking?: unknown;
+    reasoning?: unknown;
+    model?: unknown;
+  }) => {
+    const roomId = getRoomId(socket);
+    if (!roomId || !rooms[roomId]) return;
+    const game = rooms[roomId];
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player || !player.isAgent) return;
+    if (game.phase !== "ERA_INTRO" && game.phase !== "INVESTMENT") return;
+    const eraNumber = Number(era);
+    if (!Number.isFinite(eraNumber) || Math.trunc(eraNumber) !== game.currentEra) {
+      socket.emit("error", "预测时代与当前时代不一致");
+      return;
+    }
+    const ids = Array.isArray(ranking)
+      ? ranking.filter((id): id is string => typeof id === "string")
+      : [];
+    const validIds = new Set(game.players.map((p) => p.id));
+    if (
+      ids.length !== game.players.length ||
+      new Set(ids).size !== ids.length ||
+      ids.some((id) => !validIds.has(id))
+    ) {
+      socket.emit("error", "预测排名必须包含每名玩家且不重复");
+      return;
+    }
+    if (!game.predictions) game.predictions = [];
+    const existing = game.predictions.find(
+      (p) => p.playerId === player.id && p.era === game.currentEra
+    );
+    if (existing) return;
+    const prediction = {
+      id: randomBytes(8).toString("hex"),
+      playerId: player.id,
+      playerName: player.name,
+      era: game.currentEra,
+      globalRound: game.globalRound,
+      ranking: ids,
+      reasoning: typeof reasoning === "string" ? reasoning.slice(0, 2000) : "",
+      timestamp: Date.now(),
+      model: typeof model === "string" ? model.slice(0, 80) : player.agentModel,
+    };
+    game.predictions.push(prediction);
+    appendSessionEvent(
+      game,
+      "agent_prediction",
+      {
+        predictionId: prediction.id,
+        era: prediction.era,
+        globalRound: prediction.globalRound,
+        ranking: prediction.ranking,
+        reasoning: prediction.reasoning,
+        model: prediction.model,
+      },
+      player.id
+    );
+    broadcastUpdate(io, game);
+  });
+
+  // Agent 每次 LLM 决策的结构化记录（不进入实时广播，随导出与分析提供）。
+  socket.on("agentDecision", (payload?: {
+    kind?: unknown;
+    reasoning?: unknown;
+    action?: unknown;
+    model?: unknown;
+    promptTokens?: unknown;
+    completionTokens?: unknown;
+    totalTokens?: unknown;
+    latencyMs?: unknown;
+  }) => {
+    const roomId = getRoomId(socket);
+    if (!roomId || !rooms[roomId]) return;
+    const game = rooms[roomId];
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player || !player.isAgent) return;
+    const allowed = new Set([
+      "prediction",
+      "investment",
+      "auction",
+      "transaction",
+      "chat",
+      "community_name",
+    ]);
+    const kind = typeof payload?.kind === "string" ? payload.kind : "";
+    if (!allowed.has(kind)) return;
+    let action = payload?.action;
+    try {
+      const serialized = JSON.stringify(action ?? null);
+      if (serialized.length > 16_000) action = { truncated: true, preview: serialized.slice(0, 2000) };
+    } catch {
+      action = null;
+    }
+    if (!game.agentDecisions) game.agentDecisions = [];
+    if (game.agentDecisions.length >= 2000) game.agentDecisions.shift();
+    const decision = {
+      id: randomBytes(8).toString("hex"),
+      playerId: player.id,
+      playerName: player.name,
+      kind: kind as "prediction" | "investment" | "auction" | "transaction" | "chat" | "community_name",
+      phase: game.phase,
+      era: game.currentEra,
+      roundInEra: game.roundInEra,
+      globalRound: game.globalRound,
+      reasoning: typeof payload?.reasoning === "string" ? payload.reasoning.slice(0, 2000) : "",
+      action,
+      model: typeof payload?.model === "string" ? payload.model.slice(0, 80) : player.agentModel,
+      promptTokens: Number.isFinite(Number(payload?.promptTokens))
+        ? Math.trunc(Number(payload?.promptTokens))
+        : undefined,
+      completionTokens: Number.isFinite(Number(payload?.completionTokens))
+        ? Math.trunc(Number(payload?.completionTokens))
+        : undefined,
+      totalTokens: Number.isFinite(Number(payload?.totalTokens))
+        ? Math.trunc(Number(payload?.totalTokens))
+        : undefined,
+      latencyMs: Number.isFinite(Number(payload?.latencyMs))
+        ? Math.trunc(Number(payload?.latencyMs))
+        : undefined,
+      timestamp: Date.now(),
+    };
+    game.agentDecisions.push(decision);
+    appendSessionEvent(
+      game,
+      "agent_decision",
+      {
+        decisionId: decision.id,
+        kind: decision.kind,
+        era: decision.era,
+        roundInEra: decision.roundInEra,
+        globalRound: decision.globalRound,
+        reasoning: decision.reasoning,
+        action: decision.action,
+        model: decision.model,
+        totalTokens: decision.totalTokens,
+        latencyMs: decision.latencyMs,
+      },
+      player.id
+    );
   });
 
   // === Player ===
@@ -1717,6 +1882,43 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
       io.to(target.socketId).emit("playerNotify", {
         type: "chat",
         message: `${group?.name ?? "群聊"} · ${sender.name}：${result.preview}`,
+      });
+    }
+  });
+
+  socket.on("sendDirectMessage", ({ toId, text, clientTempId }) => {
+    const roomId = getRoomId(socket);
+    if (!roomId || !rooms[roomId]) return;
+    const game = rooms[roomId];
+    const sender = game.players.find((p) => p.socketId === socket.id);
+    if (!sender || typeof toId !== "string") return;
+    if (!allow(`dm:${sender.id}`, 30, 60_000)) {
+      socket.emit("error", "发送过于频繁，请稍后再试");
+      return;
+    }
+    const result = sendDirectMessage(game, sender.id, toId, text, clientTempId);
+    if (!result.ok) {
+      socket.emit("error", result.error);
+      return;
+    }
+    appendSessionEvent(
+      game,
+      "direct_message",
+      {
+        messageId: result.message.id,
+        fromId: sender.id,
+        toId: result.message.toId,
+        era: result.message.era,
+        globalRound: result.message.globalRound,
+      },
+      sender.id
+    );
+    broadcastUpdate(io, game);
+    const target = game.players.find((p) => p.id === result.notifyTargetId);
+    if (target?.socketId) {
+      io.to(target.socketId).emit("playerNotify", {
+        type: "dm",
+        message: `${sender.name} 私聊你：${result.preview}`,
       });
     }
   });

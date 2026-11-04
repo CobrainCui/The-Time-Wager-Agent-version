@@ -6,7 +6,7 @@ import {
   ProjectCard,
   eraCards,
 } from "../data/game_data.js";
-import { shuffleArray } from "../utils/shuffle.js";
+import { gameShuffle } from "./random.js";
 import {
   resolveRankPlayerCount,
   scaleRankRewardsForPlayerCount,
@@ -110,9 +110,9 @@ export function drawProjectsForEra(game: GameState) {
     countLong = 1;
   }
 
-  const drawnShort = sample(availableShort, countShort);
-  const drawnLong = sample(availableLong, countLong);
-  const drawnRisk = sample(availableRisk, countRisk);
+  const drawnShort = sampleFromGame(game, availableShort, countShort);
+  const drawnLong = sampleFromGame(game, availableLong, countLong);
+  const drawnRisk = sampleFromGame(game, availableRisk, countRisk);
 
   const shortfalls: string[] = [];
   if (drawnShort.length < countShort) {
@@ -156,8 +156,8 @@ function isProjectActiveOrDrawn(game: GameState, pid: number): boolean {
   return isActive || isDrawn;
 }
 
-function sample(pool: ProjectCard[], count: number): ProjectCard[] {
-  return shuffleArray(pool).slice(0, count);
+function sampleFromGame(game: GameState, pool: ProjectCard[], count: number): ProjectCard[] {
+  return gameShuffle(game, pool).slice(0, count);
 }
 
 function mapEraToColor(era?: string): string {

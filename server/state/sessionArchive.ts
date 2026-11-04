@@ -26,6 +26,12 @@ export type GameSessionRecord = {
   sessionStartedAt: number | null;
   completedAt: number;
   eraTheme: string | null;
+  condition?: string | null;
+  runId?: string | null;
+  seed?: number | null;
+  models?: string[];
+  /** mock 冒烟场次；正式分析应排除 */
+  mock?: boolean;
   topPlayer: { name: string; wealth: number };
   playersSummary: GameSessionPlayerSummary[];
   leaderboardRankAtComplete: number | null;
@@ -139,6 +145,11 @@ export function archiveCompletedSession(game: GameState): GameSessionRecord {
     sessionStartedAt: game.sessionStartedAt ?? null,
     completedAt,
     eraTheme: game.currentEraCard?.name ?? null,
+    condition: snapshot.meta.condition ?? null,
+    runId: snapshot.meta.runId ?? null,
+    seed: snapshot.meta.seed ?? null,
+    models: snapshot.meta.models,
+    mock: snapshot.meta.experiment?.mock === true,
     topPlayer: richest
       ? { name: richest.name, wealth: richest.wealth }
       : { name: "—", wealth: 0 },
@@ -254,6 +265,11 @@ function toListItem(s: GameSessionRecord) {
     sessionStartedAt: s.sessionStartedAt,
     completedAt: s.completedAt,
     eraTheme: s.eraTheme,
+    condition: s.condition ?? null,
+    runId: s.runId ?? null,
+    seed: s.seed ?? null,
+    models: s.models ?? [],
+    mock: s.mock === true,
     topPlayer: s.topPlayer,
     playersSummary: s.playersSummary,
     leaderboardRankAtComplete: s.leaderboardRankAtComplete,

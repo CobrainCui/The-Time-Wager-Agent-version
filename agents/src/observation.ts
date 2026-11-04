@@ -15,7 +15,6 @@ export function buildObservation(game: GameSnapshot, playerId: string): Observat
     ready: p.ready === true,
     isMe: p.id === playerId,
     isAgent: p.isAgent === true,
-    agentPersona: p.agentPersona ?? p.aiPersona ?? null,
     inventoryCount: p.inventory?.length ?? 0,
   }));
 
@@ -23,6 +22,12 @@ export function buildObservation(game: GameSnapshot, playerId: string): Observat
 
   const pending = (game.transactions ?? []).filter((t) => t.status === "pending");
   const myPending = pending.filter((t) => t.toId === playerId);
+
+  const publicGroup = (game.chatGroups ?? []).find((g) => g.kind === "public") ?? null;
+  const publicMessages = publicGroup
+    ? (game.groupMessages ?? []).filter((m) => m.groupId === publicGroup.id)
+    : [];
+  const privateMessages = (game.directMessages ?? []).filter((m) => m.toId === playerId);
 
   const auction = game.auctionFocusCardId
     ? {
@@ -61,6 +66,10 @@ export function buildObservation(game: GameSnapshot, playerId: string): Observat
     currencyLeader: leader ? leader.name : null,
     pendingTransactions: pending,
     myPendingTransactions: myPending,
+    publicMessages,
+    privateMessages,
+    publicGroupId: publicGroup?.id ?? null,
+    settlementHistory: (game.settlementHistory ?? []).slice(-3),
     auction,
     recentLogs: (game.logs ?? []).slice(-12),
   };

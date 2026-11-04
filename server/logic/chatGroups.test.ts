@@ -38,12 +38,14 @@ function human(id: string, name: string): Player {
 }
 
 describe("chatGroups", () => {
-  it("does not auto-create public group on roster sync", () => {
+  it("auto-creates public group when at least two players can chat", () => {
     const game = createInitialGame("r1", []);
     game.phase = "INVESTMENT";
     game.players = [human("a", "甲"), human("b", "乙"), { ...human("ai", "Bot"), isAI: true }];
     syncChatGroupsOnRosterChange(game);
-    assert.ok(!game.chatGroups!.some((g) => g.id === PUBLIC_GROUP_ID));
+    const pub = game.chatGroups!.find((g) => g.id === PUBLIC_GROUP_ID);
+    assert.ok(pub);
+    assert.deepEqual(pub!.memberIds.sort(), ["a", "b"]);
   });
 
   it("syncs public group members when public channel exists", () => {

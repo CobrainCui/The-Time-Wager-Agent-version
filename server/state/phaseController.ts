@@ -111,6 +111,12 @@ function advanceRound(game: GameState) {
   game.lighterBurnDeclarations = [];
   game.roundBuffPlays = [];
 
+  // 第 4 时代第 2 轮结算后直接进入命名：不再把 currentEra/globalRound 推到 5/9。
+  if (game.currentEra >= 4 && game.roundInEra >= 2) {
+    game.phase = "COMMUNITY_NAMING";
+    return;
+  }
+
   game.globalRound += 1;
   game.roundInEra += 1;
 

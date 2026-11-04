@@ -57,7 +57,7 @@ function player(id: string, overrides: Partial<Player> = {}): Player {
   };
 }
 
-describe("session export 1.2.0 alignment", () => {
+describe("session export 1.3.0 alignment", () => {
   it("meta includes sessionId, energyTableSize, eraThemeNames and omits eventChoices", () => {
     const game = createInitialGame("room-a", []);
     game.sessionId = "sess-1";
@@ -210,5 +210,71 @@ describe("session export 1.2.0 alignment", () => {
     const deal = game.auctionCompletedDeals?.find((d) => d.cardId === "buff_short");
     assert.equal(deal?.source, "force_buy");
     assert.equal(deal?.cost, 0);
+  });
+
+  it("exports lab sheets: metrics, direct messages, predictions, agent decisions", async () => {
+    const game = createInitialGame("room", [], { seedBase: 99, sessionOrdinal: 0 });
+    game.phase = "GAME_OVER";
+    const p1 = player("p1", { name: "Agent 1", wealth: 300, isAgent: true, agentIndex: 1 });
+    const p2 = player("p2", { name: "Agent 2", wealth: 200, isAgent: true, agentIndex: 2 });
+    game.players = [p1, p2];
+    game.directMessages = [
+      {
+        id: "dm1",
+        fromId: "p1",
+        fromName: "Agent 1",
+        toId: "p2",
+        toName: "Agent 2",
+        text: "合作吗",
+        timestamp: 1000,
+        era: 1,
+        roundInEra: 1,
+        globalRound: 1,
+      },
+    ];
+    game.predictions = [
+      {
+        id: "pred1",
+        playerId: "p1",
+        playerName: "Agent 1",
+        era: 1,
+        globalRound: 1,
+        ranking: ["p1", "p2"],
+        reasoning: "按财富",
+        timestamp: 900,
+      },
+    ];
+    game.agentDecisions = [
+      {
+        id: "dec1",
+        playerId: "p1",
+        playerName: "Agent 1",
+        kind: "investment",
+        phase: "INVESTMENT",
+        era: 1,
+        roundInEra: 1,
+        globalRound: 1,
+        reasoning: "test",
+        action: { investment: { 1: 3 } },
+        model: "mock-model",
+        totalTokens: 123,
+        timestamp: 1100,
+      },
+    ];
+
+    const buf = await buildSessionWorkbook(buildSessionExport(game));
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as never);
+
+    for (const name of ["指标", "指标汇总", "私聊", "预测", "Agent决策"]) {
+      assert.ok(wb.getWorksheet(name), `missing sheet ${name}`);
+    }
+    const dms = sheetToRecords(wb.getWorksheet("私聊"));
+    assert.equal(dms[0]?.["内容"], "合作吗");
+    const preds = sheetToRecords(wb.getWorksheet("预测"));
+    assert.equal(preds[0]?.["预测排名"], "Agent 1 > Agent 2");
+    const decisions = sheetToRecords(wb.getWorksheet("Agent决策"));
+    assert.equal(decisions[0]?.["类型"], "investment");
+    assert.equal(decisions[0]?.["totalTokens"], "123");
   });
 });

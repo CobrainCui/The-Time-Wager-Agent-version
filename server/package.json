@@ -5,14 +5,14 @@
   "description": "光阴对赌新新新 服务端",
   "main": "dist/index.js",
   "engines": {
-    "node": ">=20 <23",
+    "node": ">=20",
     "npm": ">=10"
   },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsc && node dist/index.js",
-    "test": "npm run build && node --test dist/logic/gameDataCatalog.test.js dist/logic/projectDraw.era.test.js dist/logic/projectSettlement.long.test.js dist/logic/projectSettlement.tied.test.js dist/logic/rankRewardSchedule.test.js dist/logic/auctionCards.revoke.test.js dist/logic/auctionCards.pool.test.js dist/logic/auctionCards.wealth.test.js dist/logic/lotterySettle.test.js dist/logic/wealthAdjust.test.js dist/logic/adminPlayerCard.test.js dist/logic/adminPerspective.test.js dist/logic/adminProjectAdjust.test.js dist/logic/deviceClaim.test.js dist/logic/coffeeLogic.test.js dist/logic/investmentLogic.energy.test.js dist/logic/analysisLogic.persona.test.js dist/logic/buffLogic.test.js dist/logic/buffCardCopySync.test.js dist/logic/p0Guards.test.js dist/logic/p1Guards.test.js dist/logic/p2Guards.test.js dist/logic/transactionHistory.test.js dist/logic/forbiddenText.test.js dist/logic/chatGroups.test.js dist/config/clientBuild.test.js dist/state/actionTimeExpiry.test.js dist/state/actionDeadline.test.js dist/state/startingWealth.test.js dist/state/sessionTelemetry.test.js dist/export/sessionExport.test.js"
+    "test": "npm run build && node --test dist/logic/gameDataCatalog.test.js dist/logic/projectDraw.era.test.js dist/logic/projectSettlement.long.test.js dist/logic/projectSettlement.tied.test.js dist/logic/rankRewardSchedule.test.js dist/logic/auctionCards.revoke.test.js dist/logic/auctionCards.pool.test.js dist/logic/auctionCards.wealth.test.js dist/logic/lotterySettle.test.js dist/logic/wealthAdjust.test.js dist/logic/adminPlayerCard.test.js dist/logic/adminPerspective.test.js dist/logic/adminProjectAdjust.test.js dist/logic/deviceClaim.test.js dist/logic/coffeeLogic.test.js dist/logic/investmentLogic.energy.test.js dist/logic/analysisLogic.persona.test.js dist/logic/buffLogic.test.js dist/logic/buffCardCopySync.test.js dist/logic/p0Guards.test.js dist/logic/p1Guards.test.js dist/logic/p2Guards.test.js dist/logic/transactionHistory.test.js dist/logic/forbiddenText.test.js dist/logic/chatGroups.test.js dist/logic/directMessages.test.js dist/config/clientBuild.test.js dist/state/actionTimeExpiry.test.js dist/state/actionDeadline.test.js dist/state/startingWealth.test.js dist/state/sessionTelemetry.test.js dist/export/sessionExport.test.js dist/utils/rng.test.js dist/analysis/metrics.test.js"
   },
   "dependencies": {
     "@types/cors": "^2.8.19",

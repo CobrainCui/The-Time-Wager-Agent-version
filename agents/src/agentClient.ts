@@ -1,30 +1,37 @@
 import { io, type Socket } from "socket.io-client";
 import type { AgentConfig, RuntimeConfig } from "./config.js";
 import { createLogger } from "./logger.js";
+import { AgentMemory } from "./memory.js";
 import { buildObservation } from "./observation.js";
 import {
   buildAuctionPrompt,
   buildCommunityNamePrompt,
   buildInvestmentPrompt,
+  buildPredictionPrompt,
   buildSystemPrompt,
   buildTransactionPrompt,
 } from "./prompts.js";
-import { askAgentJson } from "./llm.js";
 import {
-  fallbackAuction,
-  fallbackCommunityName,
-  fallbackInvestment,
-  fallbackTransactionDecision,
-} from "./policy.js";
+  LlmFailureError,
+  askAgentJson,
+  resetAgentUsage,
+  type LlmResult,
+  type LlmUsage,
+} from "./llm.js";
 import type {
   AuctionPlan,
+  ChatMessagePlan,
   GameSnapshot,
   InvestmentPlan,
   Observation,
+  PredictionPlan,
   TransactionDecision,
 } from "./types.js";
 
 const PHASE_INVEST = new Set(["INVESTMENT", "BUFF_USAGE"]);
+const PUBLIC_GROUP_ID = "__public__";
+const MAX_PUBLIC_MESSAGES_PER_TURN = 2;
+const MAX_PRIVATE_MESSAGES_PER_TURN = 2;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -40,21 +47,35 @@ function int(v: unknown): number | null {
   return Math.trunc(n);
 }
 
+function oneLine(text: unknown, max = 300): string {
+  return String(text ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
+}
+
+export interface AgentClientHooks {
+  /** 模型失败 / 预算超限 / 语义无效：终止整局，不静默兜底。 */
+  onFatal: (agentIndex: number, error: unknown) => void;
+}
+
 export class AgentClient {
   readonly cfg: AgentConfig;
   readonly runtime: RuntimeConfig;
+  private readonly hooks: AgentClientHooks;
   private readonly socket: Socket;
   private readonly log: ReturnType<typeof createLogger>;
+  private readonly memory: AgentMemory;
 
   private game: GameSnapshot | null = null;
   private playerId: string | null = null;
   private reconnectToken: string | null = null;
-  private everJoined = false;
   private joinedRoom = false;
 
   private busy = false;
   private tickTimer: NodeJS.Timeout | null = null;
   private pendingTick = false;
+  private fatalReported = false;
 
   private readySent = new Set<string>();
   private investmentPlanned = new Set<string>();
@@ -65,14 +86,21 @@ export class AgentClient {
   private auctionDecisionKeys = new Set<string>();
   private auctionDecisionsByLot = new Map<string, number>();
   private namedCommunity = false;
+  private predictionSentForEra = new Set<number>();
+  private predictionBusyForEra = new Set<number>();
+  private outcomeRecordedForRound = new Set<number>();
+  private seenPublicMessageIds = new Set<string>();
+  private seenPrivateMessageIds = new Set<string>();
   private lastPhaseKey = "";
   private previousPhase = "";
   private sessionKey = "";
 
-  constructor(cfg: AgentConfig, runtime: RuntimeConfig) {
+  constructor(cfg: AgentConfig, runtime: RuntimeConfig, hooks: AgentClientHooks) {
     this.cfg = cfg;
     this.runtime = runtime;
+    this.hooks = hooks;
     this.log = createLogger(`agent#${cfg.index}:${cfg.name}`);
+    this.memory = new AgentMemory(cfg.index, runtime.memoryDir, runtime.memoryEnabled);
     this.socket = io(runtime.serverUrl, {
       transports: ["websocket", "polling"],
       reconnection: true,
@@ -115,7 +143,6 @@ export class AgentClient {
     this.socket.on("playerJoined", (payload: { playerId?: string; reconnectToken?: string }) => {
       if (payload?.playerId) this.playerId = payload.playerId;
       if (payload?.reconnectToken) this.reconnectToken = payload.reconnectToken;
-      this.everJoined = true;
       this.joinedRoom = true;
       this.log.info(`已加入房间，playerId=${this.playerId}`);
       this.registerMeta();
@@ -143,7 +170,7 @@ export class AgentClient {
       this.log.error(`客户端版本过期：${JSON.stringify(payload)}`);
     });
     this.socket.on("deviceClaimPending", () => {
-      this.log.error("需要主持人批准换设备认领；请检查是否重复启动了 agents 进程。");
+      this.printFatal("需要主持人批准换设备认领；请检查是否重复启动了 agents 进程。");
     });
   }
 
@@ -159,8 +186,8 @@ export class AgentClient {
   private registerMeta(): void {
     this.socket.emit("agentRegister", {
       agentIndex: this.cfg.index,
-      persona: this.cfg.persona,
       model: this.cfg.model,
+      provider: this.cfg.provider,
     });
   }
 
@@ -174,7 +201,13 @@ export class AgentClient {
     if (enteringWaiting || sessionChanged) {
       this.resetSessionState();
       this.sessionKey = nextSessionKey;
+      if (nextSessionKey !== ":" && nextSessionKey !== "") {
+        this.memory.beginSession(nextSessionKey, game.sessionId ?? nextSessionKey);
+        resetAgentUsage(this.cfg.index);
+        this.log.info(`新对局：sessionKey=${nextSessionKey}`);
+      }
     }
+    this.ingestMessages(game);
     const key = phaseKey(game);
     if (key !== this.lastPhaseKey) {
       this.lastPhaseKey = key;
@@ -195,11 +228,54 @@ export class AgentClient {
     this.auctionDecisionKeys.clear();
     this.auctionDecisionsByLot.clear();
     this.namedCommunity = false;
+    this.predictionSentForEra.clear();
+    this.predictionBusyForEra.clear();
+    this.outcomeRecordedForRound.clear();
+    this.seenPublicMessageIds.clear();
+    this.seenPrivateMessageIds.clear();
     this.lastPhaseKey = "";
   }
 
+  /** 把新看到的公开/私聊写入记忆。聊天是数据，不是指令。 */
+  private ingestMessages(game: GameSnapshot): void {
+    if (!this.memory.isEnabled || !this.playerId) return;
+    for (const m of game.groupMessages ?? []) {
+      if (this.seenPublicMessageIds.has(m.id)) continue;
+      this.seenPublicMessageIds.add(m.id);
+      if (m.fromId === this.playerId) continue;
+      this.memory.record(
+        "chat",
+        `[公开] ${m.fromName}: ${oneLine(m.text, 220)}`,
+        {
+          globalRound: game.globalRound,
+          era: game.currentEra,
+          roundInEra: game.roundInEra,
+          data: { messageId: m.id, fromId: m.fromId },
+        }
+      );
+    }
+    for (const m of game.directMessages ?? []) {
+      if (this.seenPrivateMessageIds.has(m.id)) continue;
+      this.seenPrivateMessageIds.add(m.id);
+      const mine = m.toId === this.playerId || m.fromId === this.playerId;
+      if (!mine) continue;
+      // 自己发出的私聊已在 sendPlannedMessages 记录，避免重复。
+      if (m.fromId === this.playerId) continue;
+      this.memory.record(
+        "chat",
+        `[私聊] ${m.fromName} → ${m.toName}: ${oneLine(m.text, 220)}`,
+        {
+          globalRound: game.globalRound,
+          era: game.currentEra,
+          roundInEra: game.roundInEra,
+          data: { messageId: m.id, fromId: m.fromId, toId: m.toId },
+        }
+      );
+    }
+  }
+
   private scheduleTick(delay = 250): void {
-    if (this.pendingTick) return;
+    if (this.pendingTick || this.fatalReported) return;
     this.pendingTick = true;
     this.tickTimer = setTimeout(() => {
       this.pendingTick = false;
@@ -209,7 +285,7 @@ export class AgentClient {
   }
 
   private async tick(): Promise<void> {
-    if (!this.game || !this.playerId) return;
+    if (!this.game || !this.playerId || this.fatalReported) return;
     if (this.busy) {
       this.scheduleTick(400);
       return;
@@ -219,11 +295,18 @@ export class AgentClient {
     try {
       acted = await this.runTurn();
     } catch (e) {
-      this.log.error("回合处理失败", e instanceof Error ? e.stack : e);
+      this.printFatal(e instanceof Error ? e.stack ?? e.message : String(e));
     } finally {
       this.busy = false;
       if (acted) this.scheduleTick(400);
     }
+  }
+
+  private printFatal(message: unknown): void {
+    if (this.fatalReported) return;
+    this.fatalReported = true;
+    this.log.error(`【实验终止】${String(message)}`);
+    this.hooks.onFatal(this.cfg.index, message);
   }
 
   private async runTurn(): Promise<boolean> {
@@ -239,21 +322,26 @@ export class AgentClient {
 
     // 3) 阶段动作
     const key = phaseKey(game);
-    if (game.phase === "ERA_INTRO" || game.phase === "SETTLEMENT" || game.phase === "GAME_OVER") {
-      if (game.phase !== "GAME_OVER" && !obs.me.ready && !this.readySent.has(key)) {
+    if (game.phase === "ERA_INTRO") {
+      acted = (await this.handleEraIntro(obs, key)) || acted;
+    } else if (game.phase === "SETTLEMENT") {
+      this.recordSettlementOutcome(obs);
+      if (!obs.me.ready && !this.readySent.has(key)) {
         this.readySent.add(key);
-        await this.politeDelay(0.5);
+        await this.politeDelay(0.4);
         this.emit("playerReady", {});
-        this.log.info(`阶段 ${game.phase}：已准备`);
+        this.log.info(`阶段 SETTLEMENT：已准备`);
         acted = true;
       }
+    } else if (game.phase === "GAME_OVER") {
+      this.recordFinalOutcome(obs);
     } else if (PHASE_INVEST.has(game.phase)) {
       const attemptAt = this.investmentAttemptAt.get(key);
       if (
         this.investmentPlanned.has(key) &&
         !obs.me.ready &&
         attemptAt != null &&
-        Date.now() - attemptAt > 10_000
+        Date.now() - attemptAt > 20_000
       ) {
         // 上一次方案可能被服务端拒绝或事件丢失，允许再试一次
         this.investmentPlanned.delete(key);
@@ -273,6 +361,73 @@ export class AgentClient {
     return acted;
   }
 
+  private askOptions(label: string) {
+    return {
+      timeoutMs: this.runtime.decisionTimeoutMs,
+      maxRetries: this.runtime.maxRetries,
+      maxOutputTokens: this.runtime.maxOutputTokens,
+      tokenBudget: this.runtime.tokenBudget,
+      label,
+    };
+  }
+
+  /**
+   * 网络/JSON 重试在 llm.ts；这里再对「字段语义」重试一次。
+   * 仍无效则终止本局——不退回规则策略。
+   */
+  private async askWithValidation<T>(
+    label: string,
+    user: string,
+    validate: (data: unknown) => T | null,
+    semanticAttempts = 2
+  ): Promise<{ value: T; usage?: LlmUsage; latencyMs: number }> {
+    let lastProblem = "";
+    let prompt = user;
+    for (let attempt = 1; attempt <= semanticAttempts; attempt++) {
+      const result: LlmResult = await askAgentJson(
+        this.cfg,
+        buildSystemPrompt(this.cfg),
+        prompt,
+        this.askOptions(label)
+      );
+      const value = validate(result.data);
+      if (value) {
+        return {
+          value,
+          usage: result.usage
+            ? { ...result.usage, calls: 1 }
+            : undefined,
+          latencyMs: result.latencyMs,
+        };
+      }
+      lastProblem = "输出 JSON 缺少必要字段或取值非法";
+      this.log.warn(`${label} 第 ${attempt} 次语义校验失败：${lastProblem}`);
+      prompt = `${user}\n\n注意：上一次输出无效（${lastProblem}）。请严格按上面的 schema 输出单个 JSON 对象，不要输出其他内容。`;
+    }
+    throw new LlmFailureError(
+      `agent#${this.cfg.index} ${label}：${semanticAttempts} 次语义校验均失败（${lastProblem}）。`
+    );
+  }
+
+  private emitDecision(
+    kind: "prediction" | "investment" | "auction" | "transaction" | "chat" | "community_name",
+    reasoning: string,
+    action: unknown,
+    usage?: LlmUsage,
+    latencyMs?: number
+  ): void {
+    this.emit("agentDecision", {
+      kind,
+      reasoning: oneLine(reasoning, 1200),
+      action,
+      model: this.cfg.model,
+      promptTokens: usage?.prompt,
+      completionTokens: usage?.completion,
+      totalTokens: usage?.total,
+      latencyMs,
+    });
+  }
+
   private async handleNotices(obs: Observation): Promise<boolean> {
     const me = this.game!.players.find((p) => p.id === this.playerId);
     if (!me) return false;
@@ -284,6 +439,11 @@ export class AgentClient {
       this.handledNotices.add(id);
       this.emit("ackSlackHit", { hitId: hit.id });
       this.log.info(`确认摸鱼提示：${hit.energyDelta}（精力 ${hit.energyAfter}）`);
+      this.memory.record("notice", `被摸鱼传染，精力变化 ${hit.energyDelta}`, {
+        globalRound: this.game!.globalRound,
+        era: this.game!.currentEra,
+        roundInEra: this.game!.roundInEra,
+      });
       acted = true;
     }
 
@@ -293,6 +453,11 @@ export class AgentClient {
       this.handledNotices.add(id);
       this.emit("ackLighterBurn", { noticeId: notice.id });
       this.log.info(`确认打火机提示：${notice.message}`);
+      this.memory.record("notice", `被 ${notice.casterName} 用打火机烧掉 ${notice.cardName}`, {
+        globalRound: this.game!.globalRound,
+        era: this.game!.currentEra,
+        roundInEra: this.game!.roundInEra,
+      });
       acted = true;
     }
 
@@ -325,6 +490,74 @@ export class AgentClient {
     return acted;
   }
 
+  private async handleEraIntro(obs: Observation, key: string): Promise<boolean> {
+    let acted = false;
+    if (this.runtime.predictionEnabled && !this.predictionSentForEra.has(obs.era)) {
+      if (this.predictionBusyForEra.has(obs.era)) return false;
+      this.predictionBusyForEra.add(obs.era);
+      await this.submitPrediction(obs);
+      this.predictionSentForEra.add(obs.era);
+      acted = true;
+    }
+    if (!obs.me.ready && !this.readySent.has(key)) {
+      this.readySent.add(key);
+      await this.politeDelay(0.4);
+      this.emit("playerReady", {});
+      this.log.info(`阶段 ERA_INTRO：已准备`);
+      acted = true;
+    }
+    return acted;
+  }
+
+  private async submitPrediction(obs: Observation): Promise<void> {
+    const ids = obs.players.map((p) => p.id);
+    const result = await this.askWithValidation<PredictionPlan>(
+      `era${obs.era}-prediction`,
+      buildPredictionPrompt(obs, this.cfg, this.memory.digest()),
+      (data) => {
+        if (!data || typeof data !== "object") return null;
+        const raw = (data as { ranking?: unknown }).ranking;
+        if (!Array.isArray(raw)) return null;
+        const byName = new Map(obs.players.map((p) => [p.name, p.id]));
+        const ranking = raw
+          .map((v) => (typeof v === "string" ? byName.get(v) ?? v : ""))
+          .filter((v): v is string => !!v);
+        if (
+          ranking.length !== ids.length ||
+          new Set(ranking).size !== ranking.length ||
+          ranking.some((id) => !ids.includes(id))
+        ) {
+          return null;
+        }
+        return {
+          ranking,
+          reasoning:
+            typeof (data as { reasoning?: unknown }).reasoning === "string"
+              ? (data as { reasoning: string }).reasoning
+              : "",
+        };
+      }
+    );
+
+    const names = result.value.ranking
+      .map((id) => obs.players.find((p) => p.id === id)?.name ?? id)
+      .join(" > ");
+    this.emit("submitPrediction", {
+      era: obs.era,
+      ranking: result.value.ranking,
+      reasoning: result.value.reasoning,
+      model: this.cfg.model,
+    });
+    this.emitDecision("prediction", result.value.reasoning ?? "", { ranking: result.value.ranking }, result.usage, result.latencyMs);
+    this.memory.record("prediction", `时代 ${obs.era} 预测最终排名：${names}`, {
+      globalRound: obs.globalRound,
+      era: obs.era,
+      roundInEra: obs.roundInEra,
+      data: { ranking: result.value.ranking },
+    });
+    this.log.info(`时代 ${obs.era} 预测：${names}`);
+  }
+
   private async handleTransactions(obs: Observation): Promise<boolean> {
     let acted = false;
     for (const tx of obs.myPendingTransactions) {
@@ -335,6 +568,16 @@ export class AgentClient {
       this.log.info(
         `转账 ${tx.fromName} → ${tx.amount}：${decision.decision}（${decision.reasoning ?? "no reason"}）`
       );
+      this.memory.record(
+        "transfer",
+        `收到 ${tx.fromName} 的转账 ${tx.amount}（备注：${oneLine(tx.note, 80) || "无"}），我${decision.decision === "accept" ? "接受" : "拒绝"}了`,
+        {
+          globalRound: obs.globalRound,
+          era: obs.era,
+          roundInEra: obs.roundInEra,
+          data: { txId: tx.id, fromId: tx.fromId, amount: tx.amount },
+        }
+      );
       acted = true;
     }
     return acted;
@@ -342,13 +585,16 @@ export class AgentClient {
 
   private async planAndSubmitInvestment(obs: Observation): Promise<void> {
     await this.politeDelay(1);
-    const plan = await this.decideInvestment(obs);
-    const safe = this.sanitizeInvestmentPlan(plan, obs);
-    this.log.info(`投资方案：${JSON.stringify(safe)}`);
+    const result = await this.decideInvestment(obs);
+    const plan = this.sanitizeInvestmentPlan(result.plan, obs);
+    this.log.info(`投资方案：${JSON.stringify(plan)}`);
+
+    const sentMessages = await this.sendPlannedMessages(plan.messages ?? [], obs);
+    if (sentMessages > 0) await sleep(200);
 
     // 先买咖啡（+1 精力/杯），等状态刷新后再提交
-    if ((safe.coffee ?? 0) > 0) {
-      for (let i = 0; i < (safe.coffee ?? 0); i++) {
+    if ((plan.coffee ?? 0) > 0) {
+      for (let i = 0; i < (plan.coffee ?? 0); i++) {
         this.emit("performCoffee", {});
         await sleep(150);
       }
@@ -356,17 +602,17 @@ export class AgentClient {
     }
 
     // 再使用道具
-    if (safe.useCard) {
-      this.emit("useBuffCard", safe.useCard);
+    if (plan.useCard) {
+      this.emit("useBuffCard", plan.useCard);
       await this.waitForUpdate(1500);
     }
 
     // 转账（可同时进行）
-    if (safe.transfer) {
+    if (plan.transfer) {
       this.emit("createTransaction", {
-        toId: safe.transfer.toPlayerId,
-        amount: safe.transfer.amount,
-        note: safe.transfer.note ?? "",
+        toId: plan.transfer.toPlayerId,
+        amount: plan.transfer.amount,
+        note: plan.transfer.note ?? "",
         clientTempId: `agent-${this.cfg.index}-${Date.now()}`,
       });
       await sleep(200);
@@ -375,16 +621,93 @@ export class AgentClient {
     const latest = this.game ? buildObservation(this.game, this.playerId!) : obs;
     if (latest.me.ready) {
       this.log.info("已处于锁定状态，跳过提交");
-      return;
-    }
-
-    if (PHASE_INVEST.has(latest.phase)) {
-      const investment = this.sanitizeInvestment(safe.investment, latest);
+    } else if (PHASE_INVEST.has(latest.phase)) {
+      const investment = this.sanitizeInvestment(plan.investment, latest);
       this.emit("submitInvestment", { investment });
       this.log.info(`提交投资：${JSON.stringify(investment)}`);
     } else {
       this.emit("playerReady", {});
     }
+
+    this.emitDecision(
+      "investment",
+      plan.reasoning ?? "",
+      {
+        messages: plan.messages ?? [],
+        transfer: plan.transfer,
+        coffee: plan.coffee,
+        useCard: plan.useCard,
+        investment: plan.investment,
+      },
+      result.usage,
+      result.latencyMs
+    );
+    this.memory.record(
+      "action",
+      `第 ${obs.globalRound} 轮投资：${JSON.stringify(plan.investment)}` +
+        (plan.transfer ? `；转账 ${plan.transfer.amount} 给 ${obs.players.find((p) => p.id === plan.transfer!.toPlayerId)?.name ?? plan.transfer.toPlayerId}` : "") +
+        (plan.coffee ? `；买咖啡 ${plan.coffee} 杯` : "") +
+        (plan.useCard ? `；使用 ${plan.useCard.cardId}` : "") +
+        (sentMessages ? `；发言 ${sentMessages} 条` : ""),
+      {
+        globalRound: obs.globalRound,
+        era: obs.era,
+        roundInEra: obs.roundInEra,
+        data: { investment: plan.investment, transfer: plan.transfer, coffee: plan.coffee },
+      }
+    );
+  }
+
+  private async sendPlannedMessages(messages: ChatMessagePlan[], obs: Observation): Promise<number> {
+    if (!this.runtime.chatEnabled || messages.length === 0) return 0;
+    let publicSent = 0;
+    let privateSent = 0;
+    let total = 0;
+    for (const message of messages) {
+      if (!message || typeof message.text !== "string") continue;
+      const text = oneLine(message.text, 300);
+      if (!text) continue;
+      if (message.channel === "public" && publicSent < MAX_PUBLIC_MESSAGES_PER_TURN) {
+        this.emit("sendGroupMessage", {
+          groupId: obs.publicGroupId ?? PUBLIC_GROUP_ID,
+          text,
+          clientTempId: `agent-${this.cfg.index}-pub-${Date.now()}-${total}`,
+        });
+        publicSent += 1;
+        total += 1;
+        this.memory.record("chat", `[我·公开] ${text}`, {
+          globalRound: obs.globalRound,
+          era: obs.era,
+          roundInEra: obs.roundInEra,
+        });
+        await sleep(180);
+      } else if (message.channel === "private" && privateSent < MAX_PRIVATE_MESSAGES_PER_TURN) {
+        const toId = typeof message.toPlayerId === "string" ? message.toPlayerId : "";
+        const target = obs.players.find((p) => p.id === toId && !p.isMe);
+        if (!target) continue;
+        this.emit("sendDirectMessage", {
+          toId,
+          text,
+          clientTempId: `agent-${this.cfg.index}-dm-${Date.now()}-${total}`,
+        });
+        privateSent += 1;
+        total += 1;
+        this.memory.record("chat", `[我·私聊→${target.name}] ${text}`, {
+          globalRound: obs.globalRound,
+          era: obs.era,
+          roundInEra: obs.roundInEra,
+        });
+        await sleep(180);
+      }
+    }
+    if (total > 0) {
+      this.emitDecision("chat", `本轮共发送 ${total} 条消息`, {
+        public: publicSent,
+        private: privateSent,
+        messages,
+      });
+    }
+    return total;
   }
 
   private sanitizeInvestmentPlan(plan: InvestmentPlan, obs: Observation): InvestmentPlan {
@@ -434,8 +757,13 @@ export class AgentClient {
       else transfer = { ...transfer, amount };
     }
 
+    const messages = (plan.messages ?? []).filter(
+      (m) => m && (m.channel === "public" || m.channel === "private") && typeof m.text === "string"
+    );
+
     return {
       ...plan,
+      messages,
       coffee,
       useCard,
       transfer,
@@ -467,26 +795,28 @@ export class AgentClient {
     return out;
   }
 
-  private async decideInvestment(obs: Observation): Promise<InvestmentPlan> {
-    if (this.runtime.offlineMode) return fallbackInvestment(obs, this.cfg);
-    const system = buildSystemPrompt(this.cfg);
-    const user = buildInvestmentPrompt(obs, this.cfg);
-    const result = await askAgentJson(this.cfg, system, user, this.runtime.decisionTimeoutMs);
-    if (result.ok && result.data && typeof result.data === "object") {
-      const data = result.data as Partial<InvestmentPlan>;
-      if (data.investment && typeof data.investment === "object") {
+  private async decideInvestment(
+    obs: Observation
+  ): Promise<{ plan: InvestmentPlan; usage?: LlmUsage; latencyMs: number }> {
+    const result = await this.askWithValidation<InvestmentPlan>(
+      `r${obs.globalRound}-investment`,
+      buildInvestmentPrompt(obs, this.cfg, this.memory.digest()),
+      (data) => {
+        if (!data || typeof data !== "object") return null;
+        const raw = data as Partial<InvestmentPlan>;
+        if (!raw.investment || typeof raw.investment !== "object") return null;
         return {
-          reasoning: typeof data.reasoning === "string" ? data.reasoning : "",
-          transfer: data.transfer ?? null,
-          coffee: int(data.coffee) ?? 0,
-          useCard: data.useCard ?? null,
-          investment: data.investment,
+          reasoning: typeof raw.reasoning === "string" ? raw.reasoning : "",
+          messages: Array.isArray(raw.messages) ? raw.messages : [],
+          transfer: raw.transfer ?? null,
+          coffee: int(raw.coffee) ?? 0,
+          useCard: raw.useCard ?? null,
+          investment: raw.investment,
           ready: true,
         };
       }
-      this.log.warn("模型返回缺少 investment 字段，使用内置策略");
-    }
-    return fallbackInvestment(obs, this.cfg);
+    );
+    return { plan: result.value, usage: result.usage, latencyMs: result.latencyMs };
   }
 
   private async handleAuction(obs: Observation): Promise<boolean> {
@@ -511,34 +841,51 @@ export class AgentClient {
     if (this.auctionDecisionKeys.has(decisionKey)) return false;
     this.auctionDecisionKeys.add(decisionKey);
 
-    const maxBid = Math.max(0, Math.floor(obs.me.wealth * this.cfg.auctionMaxWealthRatio));
+    const maxBid = Math.max(0, Math.floor(obs.me.wealth * this.runtime.auctionMaxWealthRatio));
     const minNext = game.auctionMinimumNextBid ?? game.auctionStartingBid ?? 5;
 
     this.auctionDecisionsByLot.set(lotKey, decisions + 1);
-    const plan = await this.decideAuction(obs, cardId, maxBid);
-    this.log.info(`拍卖 ${cardId} 决策：${JSON.stringify(plan)}（上限 ${maxBid}）`);
+    const result = await this.decideAuction(obs, cardId, maxBid);
+    this.log.info(`拍卖 ${cardId} 决策：${JSON.stringify(result.plan)}（上限 ${maxBid}）`);
+    this.emitDecision("auction", result.plan.reasoning ?? "", { cardId, ...result.plan }, result.usage, result.latencyMs);
 
-    if (plan.action === "force_buy") {
+    if (result.plan.action === "force_buy") {
       if (obs.me.inventory.includes("buff_force_buy")) {
         await this.politeDelay(0.5);
         this.emit("useBuffCard", { cardId: "buff_force_buy" });
+        this.memory.record("action", `拍卖 ${cardId}：使用强买强卖`, {
+          globalRound: obs.globalRound,
+          era: obs.era,
+          roundInEra: obs.roundInEra,
+        });
         return true;
       }
+      this.passedLots.add(lotKey);
       return false;
     }
 
-    if (plan.action === "bid") {
-      const amount = int(plan.amount) ?? 0;
+    if (result.plan.action === "bid") {
+      const amount = int(result.plan.amount) ?? 0;
       if (amount >= minNext && amount <= maxBid) {
         await this.politeDelay(0.6);
         this.emit("playerPlaceAuctionBid", { amount });
         this.log.info(`出价 ${amount}`);
+        this.memory.record("action", `拍卖 ${cardId}：出价 ${amount}`, {
+          globalRound: obs.globalRound,
+          era: obs.era,
+          roundInEra: obs.roundInEra,
+        });
         return true;
       }
       this.log.warn(`出价 ${amount} 无效（最低 ${minNext} / 上限 ${maxBid}），改为放弃`);
     }
 
     this.passedLots.add(lotKey);
+    this.memory.record("action", `拍卖 ${cardId}：放弃`, {
+      globalRound: obs.globalRound,
+      era: obs.era,
+      roundInEra: obs.roundInEra,
+    });
     return false;
   }
 
@@ -546,71 +893,126 @@ export class AgentClient {
     obs: Observation,
     cardId: string,
     maxBid: number
-  ): Promise<AuctionPlan> {
-    if (this.runtime.offlineMode) return fallbackAuction(obs, this.cfg, cardId, maxBid);
-    const system = buildSystemPrompt(this.cfg);
-    const user = buildAuctionPrompt(obs, this.cfg, cardId, maxBid);
-    const result = await askAgentJson(this.cfg, system, user, this.runtime.decisionTimeoutMs);
-    if (result.ok && result.data && typeof result.data === "object") {
-      const data = result.data as Partial<AuctionPlan> & { action?: string };
-      const action = data.action;
-      if (action === "bid" || action === "pass" || action === "force_buy") {
+  ): Promise<{ plan: AuctionPlan; usage?: LlmUsage; latencyMs: number }> {
+    const result = await this.askWithValidation<AuctionPlan>(
+      `auction-${cardId}`,
+      buildAuctionPrompt(obs, this.cfg, cardId, maxBid, this.memory.digest()),
+      (data) => {
+        if (!data || typeof data !== "object") return null;
+        const raw = data as Partial<AuctionPlan> & { action?: unknown };
+        if (raw.action !== "bid" && raw.action !== "pass" && raw.action !== "force_buy") {
+          return null;
+        }
         return {
-          action,
-          amount: int(data.amount) ?? undefined,
-          reasoning: typeof data.reasoning === "string" ? data.reasoning : "",
+          action: raw.action,
+          amount: int(raw.amount) ?? undefined,
+          reasoning: typeof raw.reasoning === "string" ? raw.reasoning : "",
         };
       }
-    }
-    return fallbackAuction(obs, this.cfg, cardId, maxBid);
+    );
+    return { plan: result.value, usage: result.usage, latencyMs: result.latencyMs };
   }
 
   private async decideTransaction(
     obs: Observation,
     tx: { id: string; fromName: string; amount: number; note: string }
   ): Promise<TransactionDecision> {
-    if (this.runtime.offlineMode) return fallbackTransactionDecision();
-    const result = await askAgentJson(
-      this.cfg,
-      buildSystemPrompt(this.cfg),
-      buildTransactionPrompt(obs, { ...tx, fromId: "", toId: "", toName: "", status: "pending", timestamp: 0 }, this.cfg),
-      Math.min(this.runtime.decisionTimeoutMs, 30_000)
-    );
-    if (result.ok && result.data && typeof result.data === "object") {
-      const decision = (result.data as { decision?: string }).decision;
-      if (decision === "accept" || decision === "reject") {
+    const result = await this.askWithValidation<TransactionDecision>(
+      `tx-${tx.id.slice(0, 8)}`,
+      buildTransactionPrompt(
+        obs,
+        { ...tx, fromId: "", toId: "", toName: "", status: "pending", timestamp: 0 },
+        this.cfg,
+        this.memory.digest()
+      ),
+      (data) => {
+        if (!data || typeof data !== "object") return null;
+        const decision = (data as { decision?: unknown }).decision;
+        if (decision !== "accept" && decision !== "reject") return null;
         return {
           decision,
-          reasoning: String((result.data as { reasoning?: unknown }).reasoning ?? ""),
+          reasoning: String((data as { reasoning?: unknown }).reasoning ?? ""),
         };
+      },
+      2
+    );
+    this.emitDecision(
+      "transaction",
+      result.value.reasoning ?? "",
+      { txId: tx.id, fromName: tx.fromName, amount: tx.amount, decision: result.value.decision },
+      result.usage,
+      result.latencyMs
+    );
+    return result.value;
+  }
+
+  private recordSettlementOutcome(obs: Observation): void {
+    if (this.outcomeRecordedForRound.has(obs.globalRound)) return;
+    this.outcomeRecordedForRound.add(obs.globalRound);
+    const last = obs.settlementHistory[obs.settlementHistory.length - 1];
+    let ownGain = 0;
+    let ownInvested = 0;
+    if (last && last.round === obs.globalRound) {
+      for (const res of last.results) {
+        ownInvested += res.playerInvestments[obs.me.id] ?? 0;
+        ownGain += res.playerGains[obs.me.id]?.total ?? 0;
       }
     }
-    return fallbackTransactionDecision();
+    this.memory.record(
+      "outcome",
+      `第 ${obs.globalRound} 轮结算：财富 ${obs.me.wealth}，排名 ${obs.me.rank}` +
+        (ownInvested || ownGain ? `；本轮投入 ${ownInvested}，收益 ${ownGain}` : ""),
+      {
+        globalRound: obs.globalRound,
+        era: obs.era,
+        roundInEra: obs.roundInEra,
+        data: { wealth: obs.me.wealth, rank: obs.me.rank, ownInvested, ownGain },
+      }
+    );
+  }
+
+  private recordFinalOutcome(obs: Observation): void {
+    const key = -1;
+    if (this.outcomeRecordedForRound.has(key)) return;
+    this.outcomeRecordedForRound.add(key);
+    this.memory.record(
+      "outcome",
+      `游戏结束：最终财富 ${obs.me.wealth}，排名 ${obs.me.rank}；社区名 ${this.game?.communityName ?? "未命名"}`,
+      {
+        globalRound: obs.globalRound,
+        era: obs.era,
+        roundInEra: obs.roundInEra,
+      }
+    );
   }
 
   private async handleCommunityNaming(obs: Observation): Promise<boolean> {
     if (this.namedCommunity) return false;
-    const humans = this.game!.players.filter((p) => p.connected && !p.isAI);
-    if (humans.length === 0) return false;
-    const namer = humans.reduce((best, p) => (p.wealth > best.wealth ? p : best), humans[0]);
+    const connected = this.game!.players.filter((p) => p.connected);
+    if (connected.length === 0) return false;
+    const namer = connected.reduce((best, p) => (p.wealth > best.wealth ? p : best), connected[0]);
     if (namer.id !== this.playerId) return false;
 
     this.namedCommunity = true;
-    let name = fallbackCommunityName(this.cfg, this.cfg.index);
-    if (!this.runtime.offlineMode) {
-      const result = await askAgentJson(
-        this.cfg,
-        buildSystemPrompt(this.cfg),
-        buildCommunityNamePrompt(obs, this.cfg),
-        Math.min(this.runtime.decisionTimeoutMs, 30_000)
-      );
-      if (result.ok && result.data && typeof result.data === "object") {
-        const raw = (result.data as { name?: unknown }).name;
-        if (typeof raw === "string" && raw.trim()) name = raw.trim().slice(0, 12);
+    const result = await this.askWithValidation<string>(
+      "community-name",
+      buildCommunityNamePrompt(obs, this.cfg),
+      (data) => {
+        if (!data || typeof data !== "object") return null;
+        const raw = (data as { name?: unknown }).name;
+        if (typeof raw !== "string" || !raw.trim()) return null;
+        return raw.trim().replace(/[^一-龥A-Za-z0-9]/g, "").slice(0, 12);
       }
-    }
+    );
+    const name = result.value;
     await this.politeDelay(0.6);
     this.emit("submitCommunityName", { name });
+    this.emitDecision("community_name", `提交社区名称：${name}`, { name }, result.usage, result.latencyMs);
+    this.memory.record("action", `我为社区命名：${name}`, {
+      globalRound: obs.globalRound,
+      era: obs.era,
+      roundInEra: obs.roundInEra,
+    });
     this.log.info(`提交社区名称：${name}`);
     return true;
   }

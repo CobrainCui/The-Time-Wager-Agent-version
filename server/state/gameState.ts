@@ -1,6 +1,7 @@
 import { STARTING_WEALTH } from "../config/startingWealth.js";
 import { EventCard, EraCard, eraCards } from "../data/game_data.js";
-import { shuffleArray } from "../utils/shuffle.js";
+import { Rng, deriveSeed, seedFromEnv } from "../utils/rng.js";
+import { ExperimentMeta, experimentMetaForSeed } from "../config/experiment.js";
 import { emptySessionTelemetry, SessionTelemetry } from "./sessionTelemetry.js";
 
 export type Phase =
@@ -48,6 +49,70 @@ export interface GroupMessage {
   text: string;
   timestamp: number;
   clientTempId?: string;
+}
+
+/** 一对一私聊。与「0 元转账 + 备注」的旧私信分开记录，便于分析。 */
+export interface DirectMessage {
+  id: string;
+  fromId: string;
+  fromName: string;
+  toId: string;
+  toName: string;
+  text: string;
+  timestamp: number;
+  era: number;
+  roundInEra: number;
+  globalRound: number;
+  clientTempId?: string;
+}
+
+/** Agent 在时代开始时对最终六人排名的显式预测（心智理论测量）。 */
+export interface AgentPrediction {
+  id: string;
+  playerId: string;
+  playerName: string;
+  era: number;
+  globalRound: number;
+  /** 从第 1 名到第 6 名的玩家 id */
+  ranking: string[];
+  reasoning: string;
+  timestamp: number;
+  model?: string;
+}
+
+export type AgentDecisionKind =
+  | "prediction"
+  | "investment"
+  | "auction"
+  | "transaction"
+  | "chat"
+  | "community_name";
+
+/** Agent 每次 LLM 决策的结构化记录，用于导出与成本分析。 */
+export interface AgentDecision {
+  id: string;
+  playerId: string;
+  playerName: string;
+  kind: AgentDecisionKind;
+  phase: Phase;
+  era: number;
+  roundInEra: number;
+  globalRound: number;
+  reasoning: string;
+  action: unknown;
+  model?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  latencyMs?: number;
+  timestamp: number;
+}
+
+/** 每名玩家每轮的聊天配额计数。 */
+export interface ChatUsage {
+  round: number;
+  public: number;
+  private: number;
 }
 
 export interface ActiveProject {
@@ -316,10 +381,12 @@ export interface Player {
   isAgent?: boolean;
   /** 1–6，对应 AGENT_<n>_API_KEY */
   agentIndex?: number;
-  /** Agent 的人格 / 风格名 */
+  /** Agent 的人格 / 风格名（实验版留空，仅为兼容旧数据） */
   agentPersona?: string;
-  /** Agent 使用的模型标识（仅展示与导出） */
+  /** Agent 使用的模型标识（仅管理端与导出） */
   agentModel?: string;
+  /** Agent 的 API 供应商标签（仅管理端与导出） */
+  agentProvider?: string;
 }
 
 export interface GainBreakdown {
@@ -384,6 +451,14 @@ export interface GameState {
 
   chatGroups?: ChatGroup[];
   groupMessages?: GroupMessage[];
+  /** 一对一私聊（玩家 / Agent 均可用；仅收发双方与上帝可见） */
+  directMessages?: DirectMessage[];
+  /** 每名玩家每轮的聊天配额 */
+  chatUsage?: Record<string, ChatUsage>;
+  /** Agent 的最终排名预测 */
+  predictions?: AgentPrediction[];
+  /** Agent 的 LLM 决策记录 */
+  agentDecisions?: AgentDecision[];
 
   currentEra: number;
   roundInEra: number;
@@ -470,30 +545,53 @@ export interface GameState {
   sessionId?: string;
   /** 本局开始时间（首次正式开局） */
   sessionStartedAt?: number;
+
+  /** 实验：基准种子与派生本局种子（不广播给玩家） */
+  seedBase: number;
+  seed: number;
+  /** 本局随机流状态；所有结构性随机抽取都从这里取 */
+  rngState: number;
+  /** 同一基准种子下的第几局（0 开始） */
+  sessionOrdinal: number;
+  experiment: ExperimentMeta;
+
   /** 行为流水与结算历史（不广播给玩家客户端） */
   sessionTelemetry?: SessionTelemetry;
 }
 
-export function createInitialGame(roomId: string, _playerNames: string[]): GameState {
-  const initialEraSequence = shuffleArray([0, 1, 2, 3, 4]);
+export function createInitialGame(
+  roomId: string,
+  _playerNames: string[],
+  options: { seedBase?: number; sessionOrdinal?: number } = {}
+): GameState {
+  const seedBase = options.seedBase ?? seedFromEnv();
+  const sessionOrdinal = Math.max(0, Math.trunc(options.sessionOrdinal ?? 0));
+  const seed = deriveSeed(seedBase, sessionOrdinal);
+  const rng = new Rng(seed);
+  // 引擎只有 4 个时代（4 × 2 = 8 轮）；第 5 张时代卡不再进入序列，避免「抽了但永远玩不到」。
+  const initialEraSequence = rng.shuffle([0, 1, 2, 3, 4]).slice(0, 4);
 
   return {
     roomId,
     players: [],
     phase: "ROOM_WAITING",
     roomCreatedAt: Date.now(),
-    
+
     phaseFinished: new Set(),
     readyPlayers: new Set(),
 
     transactions: [],
     chatGroups: [],
     groupMessages: [],
+    directMessages: [],
+    chatUsage: {},
+    predictions: [],
+    agentDecisions: [],
 
     currentEra: 1,
     roundInEra: 1,
     globalRound: 1,
-    
+
     eraSequence: initialEraSequence,
     currentEraCard: eraCards.find(c => c.id === (initialEraSequence[0] + 1)) || eraCards[0],
 
@@ -501,19 +599,25 @@ export function createInitialGame(roomId: string, _playerNames: string[]): GameS
     uncompletedProjects: [],
     completedProjects: [],
     drawnProjects: new Set(),
-    
+
     totalRiskEnergyAvailable: 0,
 
     pendingEvents: {},
     eventCards: {},
     eventChoices: {},
-    
+
     logs: [],
     playerLogs: {},
 
     investmentEndsAt: undefined,
     investmentTimerPausedAt: undefined,
     tutorialStep: 0,
+
+    seedBase,
+    seed,
+    rngState: rng.rngState,
+    sessionOrdinal,
+    experiment: experimentMetaForSeed(seedBase, seed, sessionOrdinal),
 
     sessionTelemetry: emptySessionTelemetry(),
   };
@@ -533,6 +637,7 @@ function freshPlayerFromIdentity(
     | "agentIndex"
     | "agentPersona"
     | "agentModel"
+    | "agentProvider"
   >
 ): Player {
   return {
@@ -547,6 +652,7 @@ function freshPlayerFromIdentity(
     agentIndex: meta.agentIndex,
     agentPersona: meta.agentPersona,
     agentModel: meta.agentModel,
+    agentProvider: meta.agentProvider,
     ready: false,
     energy: 15,
     wealth: STARTING_WEALTH,
@@ -583,9 +689,13 @@ export function resetGameSession(game: GameState): void {
     agentIndex: p.agentIndex,
     agentPersona: p.agentPersona,
     agentModel: p.agentModel,
+    agentProvider: p.agentProvider,
   }));
 
-  const fresh = createInitialGame(game.roomId, []);
+  const fresh = createInitialGame(game.roomId, [], {
+    seedBase: game.seedBase ?? seedFromEnv(),
+    sessionOrdinal: (game.sessionOrdinal ?? 0) + 1,
+  });
   fresh.players = preserved.map(freshPlayerFromIdentity);
   fresh.logs.push("🔄 新一局已开始，状态已重置");
 
@@ -596,6 +706,10 @@ export function resetGameSession(game: GameState): void {
   game.transactions = fresh.transactions;
   game.chatGroups = fresh.chatGroups;
   game.groupMessages = fresh.groupMessages;
+  game.directMessages = fresh.directMessages;
+  game.chatUsage = fresh.chatUsage;
+  game.predictions = fresh.predictions;
+  game.agentDecisions = fresh.agentDecisions;
   game.currentEra = fresh.currentEra;
   game.roundInEra = fresh.roundInEra;
   game.globalRound = fresh.globalRound;
@@ -636,6 +750,11 @@ export function resetGameSession(game: GameState): void {
   game.roomCreatedAt = Date.now();
   game.sessionId = undefined;
   game.sessionStartedAt = undefined;
+  game.seedBase = fresh.seedBase;
+  game.seed = fresh.seed;
+  game.rngState = fresh.rngState;
+  game.sessionOrdinal = fresh.sessionOrdinal;
+  game.experiment = fresh.experiment;
   game.sessionTelemetry = emptySessionTelemetry();
 }
 

@@ -4,6 +4,7 @@ import { EXPORT_SCHEMA_VERSION, getAnalysisWeightsVersion } from "./constants.js
 import { emptySessionTelemetry } from "../state/sessionTelemetry.js";
 import { getCommunityLeaderboard } from "../state/communityLeaderboard.js";
 import { eraCards } from "../data/game_data.js";
+import { computeSessionMetrics } from "../analysis/metrics.js";
 
 type ProjectListKind = "active" | "completed" | "uncompleted";
 
@@ -42,6 +43,7 @@ function playerExportRow(p: Player) {
     agentIndex: p.agentIndex ?? null,
     agentPersona: p.agentPersona ?? "",
     agentModel: p.agentModel ?? "",
+    agentProvider: p.agentProvider ?? "",
     energy: p.energy,
     wealth: p.wealth,
     rank: p.rank,
@@ -60,6 +62,7 @@ function playerExportRow(p: Player) {
 export function buildSessionExport(game: GameState) {
   const tel = game.sessionTelemetry ?? emptySessionTelemetry();
   const exportedAt = Date.now();
+  const metrics = computeSessionMetrics(game);
 
   return {
     meta: {
@@ -79,6 +82,21 @@ export function buildSessionExport(game: GameState) {
       globalRound: game.globalRound,
       sessionStartedAt: game.sessionStartedAt ?? null,
       exportedAt,
+      /** 实验元数据：条件、种子、清单、模型、提示词版本 */
+      experiment: game.experiment ?? null,
+      seedBase: game.seedBase ?? null,
+      seed: game.seed ?? null,
+      sessionOrdinal: game.sessionOrdinal ?? null,
+      condition: game.experiment?.condition ?? null,
+      runId: game.experiment?.runId ?? null,
+      promptVersion: game.experiment?.promptVersion ?? null,
+      models: Array.from(
+        new Set(
+          game.players
+            .map((p) => [p.agentProvider, p.agentModel].filter(Boolean).join("/"))
+            .filter(Boolean)
+        )
+      ),
     },
     players: game.players.map((p) => ({
       ...playerExportRow(p),
@@ -110,6 +128,10 @@ export function buildSessionExport(game: GameState) {
     transactions: game.transactions,
     chatGroups: game.chatGroups ?? [],
     groupMessages: game.groupMessages ?? [],
+    directMessages: game.directMessages ?? [],
+    predictions: game.predictions ?? [],
+    agentDecisions: game.agentDecisions ?? [],
+    metrics,
     auctionBids: game.auctionBids ?? [],
     auctionCompletedDeals: game.auctionCompletedDeals ?? [],
     lotteryDeals: (game.lotteryCompletedDeals ?? []).map((d) => ({
@@ -159,6 +181,7 @@ export async function buildSessionWorkbook(
     Agent序号: p.agentIndex,
     Agent人格: sanitizeCell(p.agentPersona),
     Agent模型: sanitizeCell(p.agentModel),
+    Agent供应商: sanitizeCell(p.agentProvider),
     财富: p.wealth,
     精力: p.energy,
     排名: p.rank,
@@ -171,6 +194,54 @@ export async function buildSessionWorkbook(
     决策基因: p.geneCode,
   }));
   addSheet(wb, "玩家", playerSheet.length ? playerSheet : [{ 提示: "无玩家" }]);
+
+  // 指标汇总：一局一行（键值对），方便直接贴进分析表
+  const gameMetricRows = Object.entries(exportData.metrics.game).map(([k, v]) => ({
+    指标: k,
+    值: sanitizeCell(typeof v === "object" ? JSON.stringify(v) : v),
+  }));
+  addSheet(wb, "指标汇总", gameMetricRows.length ? gameMetricRows : [{ 提示: "无指标" }]);
+
+  const metricSheet = exportData.metrics.players.map((m) => ({
+    座位: m.seat,
+    玩家ID: m.playerId,
+    昵称: sanitizeCell(m.name),
+    Agent: m.isAgent,
+    Agent序号: m.agentIndex,
+    供应商: sanitizeCell(m.provider),
+    模型: sanitizeCell(m.model),
+    最终财富: m.finalWealth,
+    最终名次: m.finalRank,
+    长期精力: m.longEnergy,
+    短期精力: m.shortEnergy,
+    风险精力: m.riskEnergy,
+    总投入精力: m.totalInvestedEnergy,
+    长期占比: m.longShare,
+    短期占比: m.shortShare,
+    风险占比: m.riskShare,
+    转出次数: m.transfersSent,
+    转入次数: m.transfersReceived,
+    转出金额: m.transferAmountSent,
+    转入金额: m.transferAmountReceived,
+    转账回报率: m.transferReturnRate,
+    互惠对手数: m.mutualTransferPartners,
+    公开发言: m.publicMessages,
+    私聊条数: m.privateMessages,
+    私聊对象数: m.privatePartners,
+    拍卖出价次数: m.auctionBids,
+    拍卖得标次数: m.auctionWins,
+    拍卖花费: m.auctionSpend,
+    平均出价占可用: m.avgBidToAvailableRatio ?? "",
+    使用道具次数: m.buffsUsed,
+    主动干扰次数: m.attacksInitiated,
+    被干扰次数: m.attacksReceived,
+    预测次数: m.predictionCount,
+    预测KendallTau: m.predictionTau ?? "",
+    预测名次MAE: m.predictionMae ?? "",
+    出度: m.outDegree,
+    入度: m.inDegree,
+  }));
+  addSheet(wb, "指标", metricSheet.length ? metricSheet : [{ 提示: "无指标" }]);
 
   const eventRows = exportData.events.map((e) => ({
     时间: new Date(e.timestamp).toISOString(),
@@ -229,6 +300,59 @@ export async function buildSessionWorkbook(
     内容: sanitizeCell(m.text),
   }));
   addSheet(wb, "群聊", groupRows.length ? groupRows : [{ 提示: "无群聊" }]);
+
+  const dmRows = (exportData.directMessages ?? []).map((m) => ({
+    时间: new Date(m.timestamp).toISOString(),
+    时代: m.era,
+    轮: m.globalRound,
+    发送者ID: m.fromId,
+    发送者: sanitizeCell(m.fromName),
+    接收者ID: m.toId,
+    接收者: sanitizeCell(m.toName),
+    内容: sanitizeCell(m.text),
+  }));
+  addSheet(wb, "私聊", dmRows.length ? dmRows : [{ 提示: "无私聊" }]);
+
+  const playerNameById = new Map(exportData.players.map((p) => [p.id, p.name]));
+  const predictionScoreById = new Map(
+    exportData.metrics.predictionScores.map((s) => [s.predictionId, s])
+  );
+  const predictionRows = (exportData.predictions ?? []).map((p) => {
+    const score = predictionScoreById.get(p.id);
+    return {
+      时间: new Date(p.timestamp).toISOString(),
+      时代: p.era,
+      全局轮: p.globalRound,
+      玩家ID: p.playerId,
+      玩家: sanitizeCell(p.playerName),
+      模型: sanitizeCell(p.model ?? ""),
+      预测排名: p.ranking.map((id) => playerNameById.get(id) ?? id).join(" > "),
+      预测排名ID: p.ranking.join(" > "),
+      理由: sanitizeCell(p.reasoning),
+      KendallTau: score?.tau ?? "",
+      名次MAE: score?.mae ?? "",
+    };
+  });
+  addSheet(wb, "预测", predictionRows.length ? predictionRows : [{ 提示: "无预测" }]);
+
+  const decisionRows = (exportData.agentDecisions ?? []).map((d) => ({
+    时间: new Date(d.timestamp).toISOString(),
+    阶段: d.phase,
+    时代: d.era,
+    时代内轮: d.roundInEra,
+    全局轮: d.globalRound,
+    玩家ID: d.playerId,
+    玩家: sanitizeCell(d.playerName),
+    类型: d.kind,
+    模型: sanitizeCell(d.model ?? ""),
+    推理: sanitizeCell(d.reasoning),
+    动作: sanitizeCell(JSON.stringify(d.action)),
+    promptTokens: d.promptTokens ?? "",
+    completionTokens: d.completionTokens ?? "",
+    totalTokens: d.totalTokens ?? "",
+    延迟毫秒: d.latencyMs ?? "",
+  }));
+  addSheet(wb, "Agent决策", decisionRows.length ? decisionRows : [{ 提示: "无决策记录" }]);
 
   const projRows = exportData.projects.map((p) => ({
     ID: p.id,

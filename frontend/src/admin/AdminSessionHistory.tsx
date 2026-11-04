@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { uiRem } from "../utils/typography";
 import { adminApiUrl, adminAuthHeaders } from "./adminFetch";
-import type { SessionListItem, SessionListResponse, SessionListStatus, SessionStats } from "./sessionTypes";
+import type {
+  SessionAnalysis,
+  SessionListItem,
+  SessionListResponse,
+  SessionListStatus,
+  SessionStats,
+} from "./sessionTypes";
 
 interface Props {
   onBack: () => void;
@@ -28,6 +34,7 @@ function formatDuration(start: number | null, end: number): string {
 }
 
 function statusBadge(item: SessionListItem): { label: string; color: string } {
+  if (item.mock) return { label: "MOCK", color: "rgba(148,163,184,0.9)" };
   if (item.status === "voided") return { label: "已剔除", color: "rgba(239,68,68,0.85)" };
   if (item.leaderboardRankAtComplete != null && item.leaderboardRankAtComplete <= 10) {
     return { label: `榜内 #${item.leaderboardRankAtComplete}`, color: "rgba(168,85,247,0.9)" };
@@ -68,6 +75,9 @@ export const AdminSessionHistory: React.FC<Props> = ({ onBack }) => {
   const [searchDebounced, setSearchDebounced] = useState("");
   const [sort, setSort] = useState<"completedAt" | "communityWealth">("completedAt");
   const [detail, setDetail] = useState<SessionListItem | null>(null);
+  const [analysis, setAnalysis] = useState<SessionAnalysis | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [voidingId, setVoidingId] = useState<string | null>(null);
   /** 列表「导出」两步：先 JSON，再点一次下 Excel */
   const [listExportAwaitingXlsxId, setListExportAwaitingXlsxId] = useState<string | null>(null);
@@ -121,6 +131,39 @@ export const AdminSessionHistory: React.FC<Props> = ({ onBack }) => {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!detail) {
+      setAnalysis(null);
+      setAnalysisError(null);
+      return;
+    }
+    let cancelled = false;
+    setAnalysisLoading(true);
+    setAnalysisError(null);
+    fetch(adminApiUrl(`/api/admin/sessions/${encodeURIComponent(detail.sessionId)}/analysis`), {
+      headers: adminAuthHeaders(),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error((err as { error?: string }).error ?? res.statusText);
+        }
+        return (await res.json()) as SessionAnalysis;
+      })
+      .then((data) => {
+        if (!cancelled) setAnalysis(data);
+      })
+      .catch((e) => {
+        if (!cancelled) setAnalysisError(e instanceof Error ? e.message : "分析数据加载失败");
+      })
+      .finally(() => {
+        if (!cancelled) setAnalysisLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail]);
 
   const handleVoid = async (item: SessionListItem) => {
     const ok = window.confirm(
@@ -323,6 +366,7 @@ export const AdminSessionHistory: React.FC<Props> = ({ onBack }) => {
               <th style={{ textAlign: "right", padding: "0.75rem 1rem" }}>社区财富</th>
               <th style={{ textAlign: "center", padding: "0.75rem 1rem" }}>人数</th>
               <th style={{ textAlign: "left", padding: "0.75rem 1rem" }}>房间</th>
+              <th style={{ textAlign: "left", padding: "0.75rem 1rem" }}>条件 / 种子</th>
               <th style={{ textAlign: "left", padding: "0.75rem 1rem" }}>首富</th>
               <th style={{ textAlign: "left", padding: "0.75rem 1rem" }}>状态</th>
               <th style={{ textAlign: "right", padding: "0.75rem 1rem" }}>操作</th>
@@ -331,13 +375,13 @@ export const AdminSessionHistory: React.FC<Props> = ({ onBack }) => {
           <tbody>
             {loading && list.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-muted)" }}>
+                <td colSpan={9} style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-muted)" }}>
                   加载中…
                 </td>
               </tr>
             ) : list.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-muted)" }}>
+                <td colSpan={9} style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-muted)" }}>
                   {statusFilter === "active"
                     ? "暂无归档场次。自功能上线后完成社区命名的对局将自动出现在此列表。"
                     : "没有匹配的场次"}
@@ -364,6 +408,9 @@ export const AdminSessionHistory: React.FC<Props> = ({ onBack }) => {
                       }}
                     >
                       {item.roomId}
+                    </td>
+                    <td style={{ padding: "0.65rem 1rem", fontSize: uiRem(0.74), color: "#c4b5fd" }}>
+                      {item.condition ?? "ad-hoc"} / {item.seed ?? "—"}
                     </td>
                     <td style={{ padding: "0.65rem 1rem" }}>
                       {item.topPlayer.name}
@@ -541,6 +588,183 @@ export const AdminSessionHistory: React.FC<Props> = ({ onBack }) => {
                 ))}
               </tbody>
             </table>
+            <h3 style={{ fontSize: uiRem(0.9), marginTop: "1.25rem" }}>实验分析</h3>
+            {analysisLoading && (
+              <p style={{ color: "var(--color-text-muted)", fontSize: uiRem(0.78) }}>加载分析数据…</p>
+            )}
+            {analysisError && (
+              <p style={{ color: "#f87171", fontSize: uiRem(0.78) }}>{analysisError}</p>
+            )}
+            {analysis && !analysis.metrics && (
+              <p style={{ color: "var(--color-text-muted)", fontSize: uiRem(0.78) }}>
+                该场次是旧版归档，没有内置指标；请导出 JSON 后离线计算，或重新跑一局实验室版。
+              </p>
+            )}
+            {analysis?.metrics && (
+              <>
+                <div
+                  style={{
+                    marginTop: "0.5rem",
+                    padding: "0.65rem 0.75rem",
+                    borderRadius: "0.5rem",
+                    background: "rgba(251,191,36,0.08)",
+                    border: "1px solid rgba(251,191,36,0.25)",
+                    fontSize: uiRem(0.74),
+                    lineHeight: 1.6,
+                  }}
+                >
+                  <div>条件：{String(analysis.meta.condition ?? "ad-hoc")}</div>
+                  <div>种子：{String(analysis.meta.seed ?? "—")}</div>
+                  <div>模型：{(analysis.meta.models ?? []).join(" / ") || "—"}</div>
+                  <div>提示词版本：{String((analysis.meta.experiment as { promptVersion?: string } | null)?.promptVersion ?? "—")}</div>
+                </div>
+
+                <h4 style={{ fontSize: uiRem(0.82), marginTop: "1rem", color: "#fbbf24" }}>局级指标</h4>
+                <table style={{ width: "100%", fontSize: uiRem(0.74), marginTop: "0.35rem" }}>
+                  <tbody>
+                    {[
+                      ["最终财富合计", analysis.metrics.game.totalWealth],
+                      ["财富极差", analysis.metrics.game.wealthRange],
+                      ["基尼系数", analysis.metrics.game.gini],
+                      ["财富变异系数", analysis.metrics.game.wealthCv],
+                      ["转账笔数 / 金额", `${analysis.metrics.game.transferCount} / ${analysis.metrics.game.transferVolume}`],
+                      ["关系互惠率", analysis.metrics.game.transferReciprocity],
+                      ["公开 / 私聊条数", `${analysis.metrics.game.publicMessageCount} / ${analysis.metrics.game.privateMessageCount}`],
+                      ["干扰次数", analysis.metrics.game.attackCount],
+                      ["预测平均 τ / MAE", `${analysis.metrics.game.meanPredictionTau ?? "—"} / ${analysis.metrics.game.meanPredictionMae ?? "—"}`],
+                    ].map(([label, value]) => (
+                      <tr key={String(label)}>
+                        <td style={{ padding: "0.2rem 0", color: "var(--color-text-muted)" }}>{String(label)}</td>
+                        <td style={{ textAlign: "right", fontFamily: "var(--font-mono)" }}>{String(value ?? "—")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <h4 style={{ fontSize: uiRem(0.82), marginTop: "1rem", color: "#fbbf24" }}>玩家指标</h4>
+                <div style={{ overflowX: "auto", marginTop: "0.35rem" }}>
+                  <table style={{ width: "100%", fontSize: uiRem(0.7), borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ color: "var(--color-text-muted)", textAlign: "left" }}>
+                        <th style={{ padding: "0.25rem 0.35rem" }}>玩家</th>
+                        <th style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>财富</th>
+                        <th style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>名次</th>
+                        <th style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>长期%</th>
+                        <th style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>风险%</th>
+                        <th style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>转出/入</th>
+                        <th style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>公开/私聊</th>
+                        <th style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>预测τ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analysis.metrics.players.map((p) => (
+                        <tr key={p.playerId} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                          <td style={{ padding: "0.25rem 0.35rem" }}>
+                            {p.name}
+                            {p.agentIndex != null ? ` #${p.agentIndex}` : ""}
+                          </td>
+                          <td style={{ padding: "0.25rem 0.35rem", textAlign: "right", fontFamily: "var(--font-mono)" }}>{p.finalWealth}</td>
+                          <td style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>{p.finalRank}</td>
+                          <td style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>{Math.round(p.longShare * 100)}</td>
+                          <td style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>{Math.round(p.riskShare * 100)}</td>
+                          <td style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>{p.transfersSent}/{p.transfersReceived}</td>
+                          <td style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>{p.publicMessages}/{p.privateMessages}</td>
+                          <td style={{ padding: "0.25rem 0.35rem", textAlign: "right" }}>{p.predictionTau ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <h4 style={{ fontSize: uiRem(0.82), marginTop: "1rem", color: "#fbbf24" }}>预测记录</h4>
+                {analysis.predictions.length === 0 ? (
+                  <p style={{ color: "var(--color-text-muted)", fontSize: uiRem(0.74) }}>无预测记录</p>
+                ) : (
+                  <div style={{ maxHeight: "220px", overflowY: "auto", marginTop: "0.35rem" }}>
+                    {analysis.predictions.map((p) => {
+                      const score = analysis.metrics.predictionScores.find((s) => s.predictionId === p.id);
+                      return (
+                        <div
+                          key={p.id}
+                          style={{
+                            fontSize: uiRem(0.7),
+                            padding: "0.35rem 0",
+                            borderTop: "1px solid rgba(255,255,255,0.06)",
+                          }}
+                        >
+                          <span style={{ color: "#fbbf24" }}>{p.playerName}</span>
+                          <span style={{ color: "var(--color-text-muted)" }}> 时代 {p.era} </span>
+                          <span>{p.ranking.map((id) => analysis.players.find((x) => x.id === id)?.name ?? id).join(" > ")}</span>
+                          <span style={{ color: "var(--color-text-muted)" }}>
+                            {" "}τ={score?.tau ?? "—"} MAE={score?.mae ?? "—"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <h4 style={{ fontSize: uiRem(0.82), marginTop: "1rem", color: "#fbbf24" }}>通信记录</h4>
+                {analysis.groupMessages.length + analysis.directMessages.length === 0 ? (
+                  <p style={{ color: "var(--color-text-muted)", fontSize: uiRem(0.74) }}>无通信记录</p>
+                ) : (
+                  <div style={{ maxHeight: "240px", overflowY: "auto", marginTop: "0.35rem" }}>
+                    {[
+                      ...analysis.groupMessages.map((m) => ({
+                        id: m.id,
+                        ts: m.timestamp,
+                        text: `[公开] ${m.fromName}: ${m.text}`,
+                      })),
+                      ...analysis.directMessages.map((m) => ({
+                        id: m.id,
+                        ts: m.timestamp,
+                        text: `[私聊] ${m.fromName} → ${m.toName}: ${m.text}`,
+                      })),
+                    ]
+                      .sort((a, b) => a.ts - b.ts)
+                      .slice(-80)
+                      .map((m) => (
+                        <div
+                          key={m.id}
+                          style={{
+                            fontSize: uiRem(0.7),
+                            padding: "0.25rem 0",
+                            borderTop: "1px solid rgba(255,255,255,0.06)",
+                            color: "var(--color-text-secondary)",
+                          }}
+                        >
+                          {m.text}
+                        </div>
+                      ))}
+                  </div>
+                )}
+                <h4 style={{ fontSize: uiRem(0.82), marginTop: "1rem", color: "#fbbf24" }}>Agent 决策</h4>
+                {analysis.agentDecisions.length === 0 ? (
+                  <p style={{ color: "var(--color-text-muted)", fontSize: uiRem(0.74) }}>无 Agent 决策记录</p>
+                ) : (
+                  <div style={{ maxHeight: "260px", overflowY: "auto", marginTop: "0.35rem" }}>
+                    {analysis.agentDecisions.slice(-100).reverse().map((d) => (
+                      <div
+                        key={d.id}
+                        style={{
+                          fontSize: uiRem(0.7),
+                          padding: "0.3rem 0",
+                          borderTop: "1px solid rgba(255,255,255,0.06)",
+                        }}
+                      >
+                        <span style={{ color: "#60a5fa" }}>{d.playerName}</span>
+                        <span style={{ color: "var(--color-text-muted)" }}>
+                          {" "}
+                          {d.kind}
+                          {d.totalTokens ? ` · ${d.totalTokens} tok` : ""}
+                          {d.latencyMs ? ` · ${d.latencyMs}ms` : ""}
+                        </span>
+                        <div style={{ color: "var(--color-text-secondary)" }}>{d.reasoning}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
             {detail.hasSnapshot && (
               <div style={{ marginTop: "1.25rem" }}>
                 <p

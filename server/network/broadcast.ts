@@ -3,10 +3,11 @@ import { Server } from "socket.io";
 import { GameState, Transaction } from "../state/gameState.js";
 import { getPublicCommunityLeaderboard } from "../state/communityLeaderboard.js";
 import { peekNextRoundEnergy } from "../logic/energySchedule.js";
-import { buildAuctionLotPublicView, publicSessionAuctionWins } from "../logic/auctionCards.js";
+import { buildAuctionLotPublicView, getAuctionCardIdsForGame, publicSessionAuctionWins } from "../logic/auctionCards.js";
 import { pendingDeviceClaimsForGodView } from "../logic/deviceClaim.js";
 import { transactionsForViewerPayload, visibleTransactionsForViewer } from "../util/transactionHistory.js";
 import { chatGroupsForViewer, groupMessagesForViewer } from "../logic/chatGroups.js";
+import { directMessagesForViewer } from "../logic/directMessages.js";
 import { GROUP_CHAT_ENABLED } from "../config/playerChatFeatures.js";
 import { serializationForMemberSocket } from "./adminPerspective.js";
 import type { SettlementBaseline } from "../logic/settlementBaseline.js";
@@ -55,6 +56,14 @@ export function serializeGameForClient(
     settlementBaseline: _settlementBaseline,
     adminProjectAdjustments: _adminProjectAdjustments,
     hostRevision: _hostRevision,
+    seedBase: _seedBase,
+    seed: _seed,
+    rngState: _rngState,
+    sessionOrdinal: _sessionOrdinal,
+    experiment: _experiment,
+    predictions,
+    agentDecisions,
+    chatUsage: _chatUsage,
     ...gamePublic
   } = game;
   const hideInvestments = HIDDEN_INVESTMENT_PHASES.has(game.phase);
@@ -74,11 +83,17 @@ export function serializeGameForClient(
   const groupMessages = GROUP_CHAT_ENABLED
     ? groupMessagesForViewer(game, viewerPlayerId ?? null, isGodView)
     : [];
+  const directMessages = directMessagesForViewer(game, viewerPlayerId ?? null, isGodView);
+  const ownPredictions = isGodView
+    ? predictions ?? []
+    : (predictions ?? []).filter((p) => p.playerId === viewerPlayerId);
 
   return {
     ...gamePublic,
     chatGroups,
     groupMessages,
+    directMessages,
+    predictions: ownPredictions,
     ...lotView,
     auctionSessionWins: publicSessionAuctionWins(game),
     ...(isGodView
@@ -98,6 +113,13 @@ export function serializeGameForClient(
           pendingDeviceClaims: pendingDeviceClaimsForGodView(game),
           auctionCompletedDeals: game.auctionCompletedDeals ?? [],
           auctionBids: auctionBids ?? [],
+          /** 实验元数据与主持专用：玩家视图不下发 */
+          experiment: _experiment ?? null,
+          seed: _seed ?? null,
+          seedBase: _seedBase ?? null,
+          sessionOrdinal: _sessionOrdinal ?? 0,
+          auctionPoolCardIds: getAuctionCardIdsForGame(game),
+          agentDecisions: agentDecisions ?? [],
         }
       : {
           ...(ownLotteryOffer ? { pendingLotteryOffer: ownLotteryOffer } : {}),
@@ -120,10 +142,16 @@ export function serializeGameForClient(
         inventory,
         activeBuffs,
         usedCards,
+        // 实验盲区：非上帝视角不暴露其他 Agent 的序号 / 人格 / 模型 / 供应商
+        agentPersona,
+        agentModel,
+        agentProvider,
+        agentIndex,
         // 旧局内存可能仍带幽灵字段，避免漏进玩家 payload
         lighterBurnGhostIds: _lighterBurnGhostIds,
         ...rest
       } = p as typeof p & { lighterBurnGhostIds?: string[] };
+      const agentMeta = isGodView ? { agentPersona, agentModel, agentProvider, agentIndex } : {};
       const slackAttribution =
         isGodView
           ? { slackedBy: p.slackedBy ?? [], slackEnergyLost: p.slackEnergyLost ?? [] }
@@ -137,6 +165,7 @@ export function serializeGameForClient(
         return {
           ...restWithoutEnergy,
           ...energyField,
+          ...agentMeta,
           ...slackAttribution,
           inventory,
           activeBuffs,
@@ -153,6 +182,7 @@ export function serializeGameForClient(
       return {
         ...restWithoutEnergy,
         ...energyField,
+        ...agentMeta,
         ...slackAttribution,
         // 他人手牌 / 已发动 / 已用对玩家隐藏
         buffRoundNotes: undefined,
