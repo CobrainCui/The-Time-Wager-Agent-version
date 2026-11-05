@@ -212,6 +212,8 @@ export interface Observation {
     usedCards: string[];
     coffeePurchases: number;
     investment: Record<string, number>;
+    /** 已发出、对方尚未确认的转账合计（拍卖/再转账的可用财富要扣掉） */
+    pendingOut: number;
   };
   players: Array<{
     id: string;

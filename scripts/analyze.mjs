@@ -83,11 +83,17 @@ for (const run of runs) {
     const metrics = snapshot?.metrics;
     if (!metrics) continue;
     const condition = meta.condition ?? run.manifest?.condition ?? "unknown";
+    const seedBase = meta.seedBase ?? run.manifest?.seedBase ?? "";
+    const sessionOrdinal = meta.sessionOrdinal ?? "";
     sessionRows.push({
       runId: run.name,
       sessionId: s.sessionId,
       condition,
+      seedBase,
       seed: meta.seed ?? "",
+      sessionOrdinal,
+      promptVersion: meta.promptVersion ?? run.manifest?.promptVersion ?? "",
+      gitCommit: meta.gitCommit ?? run.manifest?.gitCommit ?? "",
       mock,
       ...metrics.game,
     });
@@ -96,7 +102,9 @@ for (const run of runs) {
         runId: run.name,
         sessionId: s.sessionId,
         condition,
+        seedBase,
         seed: meta.seed ?? "",
+        sessionOrdinal,
         mock,
         playerId: p.playerId,
         player: p.name,
@@ -110,14 +118,21 @@ for (const run of runs) {
         riskShare: p.riskShare,
         transfersSent: p.transfersSent,
         transfersReceived: p.transfersReceived,
+        transferAmountSent: p.transferAmountSent,
+        transferAmountReceived: p.transferAmountReceived,
         transferReturnRate: p.transferReturnRate,
         mutualTransferPartners: p.mutualTransferPartners,
         publicMessages: p.publicMessages,
         privateMessages: p.privateMessages,
+        privatePartners: p.privatePartners,
         auctionBids: p.auctionBids,
         auctionWins: p.auctionWins,
+        auctionSpend: p.auctionSpend,
+        avgBidToAvailableRatio: p.avgBidToAvailableRatio ?? "",
+        buffsUsed: p.buffsUsed,
         attacksInitiated: p.attacksInitiated,
         attacksReceived: p.attacksReceived,
+        predictionCount: p.predictionCount,
         predictionTau: p.predictionTau ?? "",
         predictionMae: p.predictionMae ?? "",
         outDegree: p.outDegree,
@@ -129,6 +144,7 @@ for (const run of runs) {
         runId: run.name,
         sessionId: s.sessionId,
         condition,
+        seedBase,
         seed: meta.seed ?? "",
         era: pr.era,
         player: pr.playerName,
@@ -140,10 +156,12 @@ for (const run of runs) {
 }
 
 function toCsv(rows) {
-  if (rows.length === 0) return "";  const headers = Object.keys(rows[0]);
+  if (rows.length === 0) return "";
+  const headers = Object.keys(rows[0]);
   const escape = (v) => {
-    const s = String(v ?? "");
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    const raw =
+      v && typeof v === "object" ? JSON.stringify(v) : v == null ? "" : String(v);
+    return /[",\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
   };
   return [headers.join(","), ...rows.map((r) => headers.map((h) => escape(r[h])).join(","))].join("\n") + "\n";
 }
@@ -198,16 +216,23 @@ for (const [condition, rows] of byCondition) {
     mock: rows[0]?.mock ?? false,
     models: [...new Set(rows.map((r) => `${r.provider}/${r.model}`))].join("|"),
     meanGini: round4(mean(sessionGameRows.map((r) => r.gini))),
+    meanGiniNonNegative: round4(mean(sessionGameRows.map((r) => r.giniNonNegative))),
+    meanNegativeWealthPlayers: round4(
+      mean(sessionGameRows.map((r) => r.negativeWealthPlayers))
+    ),
     meanTotalWealth: round4(mean(sessionGameRows.map((r) => r.totalWealth))),
     meanTransferCount: round4(mean(sessionGameRows.map((r) => r.transferCount))),
+    meanTransferVolume: round4(mean(sessionGameRows.map((r) => r.transferVolume))),
     meanPublicMessages: round4(mean(sessionGameRows.map((r) => r.publicMessageCount))),
     meanPrivateMessages: round4(mean(sessionGameRows.map((r) => r.privateMessageCount))),
     meanAttackCount: round4(mean(sessionGameRows.map((r) => r.attackCount))),
+    meanAuctionSpend: round4(mean(sessionGameRows.map((r) => r.auctionSpend))),
     meanPredictionTau: round4(mean(sessionGameRows.map((r) => r.meanPredictionTau))),
     meanPredictionMae: round4(mean(sessionGameRows.map((r) => r.meanPredictionMae))),
     withinLongShareRange: round4(within("longShare")),
     withinTransferSentRange: round4(within("transfersSent")),
     withinPublicMessageRange: round4(within("publicMessages")),
+    withinAuctionSpendRange: round4(within("auctionSpend")),
     withinPredictionTauRange: round4(within("predictionTau")),
     betweenPlayerPredictionTauSd: round4(sd(rows.map((r) => r.predictionTau))),
   });

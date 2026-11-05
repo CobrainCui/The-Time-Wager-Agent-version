@@ -36,6 +36,8 @@ export interface RuntimeConfig {
   maxOutputTokens: number;
   maxRetries: number;
   joinStaggerMs: number;
+  /** 启动后等待全部 Agent 就座的硬超时；超时终止本次 run，避免无限空等 */
+  joinTimeoutMs: number;
   /** 0 = 不限制；实验运行器用 AGENT_GAME_LIMIT 控制局数 */
   gameLimit: number;
   chatEnabled: boolean;
@@ -108,13 +110,6 @@ export function loadRuntimeConfig(): RuntimeConfig {
   const defaultModel = (process.env.AGENT_DEFAULT_MODEL ?? "").trim();
   const temperature = envNumber("AGENT_TEMPERATURE", 0.7);
 
-  if (!defaultModel) {
-    throw new Error(
-      "未配置 AGENT_DEFAULT_MODEL。实验版要求每个 Agent 明确使用哪个模型；" +
-        "请在根目录 .env 设置 AGENT_DEFAULT_MODEL 或 AGENT_<n>_MODEL。"
-    );
-  }
-
   const agents = seeds.map((seed) => {
     const apiKey = (process.env[`AGENT_${seed.index}_API_KEY`] ?? "").trim();
     const baseURL = (process.env[`AGENT_${seed.index}_BASE_URL`] ?? "").trim() || defaultBaseURL;
@@ -129,6 +124,15 @@ export function loadRuntimeConfig(): RuntimeConfig {
       temperature,
     };
   });
+
+  // 允许只给每个 Agent 单独配模型；只有真的缺失时才报错。
+  const missingModels = agents.filter((a) => !a.model).map((a) => a.index);
+  if (missingModels.length > 0) {
+    throw new Error(
+      `以下 Agent 未配置模型：${missingModels.join(", ")}。` +
+        "请在根目录 .env 设置 AGENT_<n>_MODEL，或设置 AGENT_DEFAULT_MODEL 作为统一默认值。"
+    );
+  }
 
   const missingKeys = agents.filter((a) => isPlaceholderKey(a.apiKey)).map((a) => a.index);
   if (missingKeys.length > 0) {
@@ -166,6 +170,7 @@ export function loadRuntimeConfig(): RuntimeConfig {
     maxOutputTokens: envNumber("AGENT_MAX_OUTPUT_TOKENS", 1_200),
     maxRetries: Math.max(1, envNumber("AGENT_MAX_RETRIES", 3)),
     joinStaggerMs: Math.max(0, envNumber("AGENT_JOIN_STAGGER_MS", 350)),
+    joinTimeoutMs: Math.max(5_000, envNumber("AGENT_JOIN_TIMEOUT_MS", 90_000)),
     gameLimit: Math.max(0, envNumber("AGENT_GAME_LIMIT", 0)),
     chatEnabled: envBool("AGENT_CHAT_ENABLED", true),
     memoryEnabled: envBool("AGENT_MEMORY_ENABLED", true),

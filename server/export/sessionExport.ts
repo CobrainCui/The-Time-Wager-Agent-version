@@ -90,6 +90,12 @@ export function buildSessionExport(game: GameState) {
       condition: game.experiment?.condition ?? null,
       runId: game.experiment?.runId ?? null,
       promptVersion: game.experiment?.promptVersion ?? null,
+      /** 顶层冗余字段：分析脚本与 XLSX 可直接读取，不必再进 experiment 对象 */
+      promptHash: game.experiment?.promptHash ?? null,
+      gitCommit: game.experiment?.gitCommit ?? null,
+      mock: game.experiment?.mock ?? false,
+      policyMode: game.experiment?.policyMode ?? "llm",
+      nodeVersion: game.experiment?.nodeVersion ?? process.version,
       models: Array.from(
         new Set(
           game.players

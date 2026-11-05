@@ -53,10 +53,17 @@ export interface PlayerMetrics {
 
 export interface GameMetrics {
   playerCount: number;
+  /** 仅当游戏已结束（命名/终局）时为 true；否则预测评分是暂定的 */
+  finalized: boolean;
   totalWealth: number;
+  minWealth: number;
+  maxWealth: number;
+  negativeWealthPlayers: number;
   wealthRange: number;
   wealthCv: number;
   gini: number;
+  /** 把负财富截断为 0 后的基尼；负财富会污染原始 gini，建议主分析用这个 */
+  giniNonNegative: number;
   transferCount: number;
   transferVolume: number;
   transferReciprocity: number;
@@ -330,10 +337,15 @@ export function computeSessionMetrics(game: GameState): SessionMetrics {
     generatedAt: Date.now(),
     game: {
       playerCount: players.length,
+      finalized: game.phase === "GAME_OVER" || game.phase === "COMMUNITY_NAMING",
       totalWealth: sum,
+      minWealth: wealths.length ? Math.min(...wealths) : 0,
+      maxWealth: wealths.length ? Math.max(...wealths) : 0,
+      negativeWealthPlayers: wealths.filter((w) => w < 0).length,
       wealthRange: wealths.length ? Math.max(...wealths) - Math.min(...wealths) : 0,
       wealthCv: avg > 0 ? round4(Math.sqrt(variance) / avg) : 0,
       gini: round4(gini(wealths)),
+      giniNonNegative: round4(gini(wealths.map((w) => Math.max(0, w)))),
       transferCount: acceptedTransfers.length,
       transferVolume: acceptedTransfers.reduce((s, t) => s + t.amount, 0),
       transferReciprocity:

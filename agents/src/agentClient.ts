@@ -29,9 +29,12 @@ import type {
 } from "./types.js";
 
 const PHASE_INVEST = new Set(["INVESTMENT", "BUFF_USAGE"]);
-const PUBLIC_GROUP_ID = "__public__";
 const MAX_PUBLIC_MESSAGES_PER_TURN = 2;
 const MAX_PRIVATE_MESSAGES_PER_TURN = 2;
+/** 每杯咖啡的财富成本；与 server/logic/coffeeLogic.ts 保持一致 */
+const COFFEE_WEALTH_COST = 17;
+/** 没有 gameUpdate 时的兜底心跳：重试被静默拒绝的动作，避免整局卡住 */
+const HEARTBEAT_MS = 3_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -74,6 +77,7 @@ export class AgentClient {
 
   private busy = false;
   private tickTimer: NodeJS.Timeout | null = null;
+  private heartbeatTimer: NodeJS.Timeout | null = null;
   private pendingTick = false;
   private fatalReported = false;
 
@@ -109,6 +113,13 @@ export class AgentClient {
       path: "/socket.io/",
     });
     this.bind();
+    // 即使服务端没有广播新状态（例如某次动作被静默拒绝），也定期重新评估，
+    // 保证「投资重试 / 转账回执 / 阶段 ready」不会因为等不到事件而卡死。
+    this.heartbeatTimer = setInterval(() => {
+      if (!this.joinedRoom || this.fatalReported) return;
+      this.scheduleTick(0);
+    }, HEARTBEAT_MS);
+    this.heartbeatTimer.unref?.();
   }
 
   get index(): number {
@@ -144,6 +155,16 @@ export class AgentClient {
       if (payload?.playerId) this.playerId = payload.playerId;
       if (payload?.reconnectToken) this.reconnectToken = payload.reconnectToken;
       this.joinedRoom = true;
+      // 断线期间可能漏掉回执；重连后允许重新处理仍在待确认列表里的事务。
+      // ready / investment 的重发是幂等的：服务端已 ready 时会被忽略。
+      this.handledTransactions.clear();
+      this.handledNotices.clear();
+      this.readySent.clear();
+      this.investmentPlanned.clear();
+      this.predictionBusyForEra.clear();
+      // 拍卖决策键也清掉：断线前若出价事件丢失，重连后可以再试一次；
+      // 服务端会拒绝「已领先/低于最低价」的出价，不会造成重复成交。
+      this.auctionDecisionKeys.clear();
       this.log.info(`已加入房间，playerId=${this.playerId}`);
       this.registerMeta();
       this.scheduleTick(300);
@@ -167,7 +188,8 @@ export class AgentClient {
       this.joinedRoom = false;
     });
     this.socket.on("clientUpdateRequired", (payload: unknown) => {
-      this.log.error(`客户端版本过期：${JSON.stringify(payload)}`);
+      // 版本不一致会让服务端拒绝关键事件；继续跑只会产生不可信数据，直接终止。
+      this.printFatal(`客户端版本过期：${JSON.stringify(payload)}`);
     });
     this.socket.on("deviceClaimPending", () => {
       this.printFatal("需要主持人批准换设备认领；请检查是否重复启动了 agents 进程。");
@@ -311,14 +333,21 @@ export class AgentClient {
 
   private async runTurn(): Promise<boolean> {
     const game = this.game!;
-    const obs = buildObservation(game, this.playerId!);
+    let obs = buildObservation(game, this.playerId!);
     let acted = false;
 
     // 1) 立即回执类：摸鱼 / 打火机 / 彩票 / 财富调整
-    acted = (await this.handleNotices(obs)) || acted;
+    const noticesActed = await this.handleNotices(obs);
+    acted = noticesActed || acted;
 
     // 2) 待处理转账
-    acted = (await this.handleTransactions(obs)) || acted;
+    const txActed = await this.handleTransactions(obs);
+    acted = txActed || acted;
+
+    // 转账/开奖会改变财富，后续投资与拍卖必须用最新视角
+    if (noticesActed || txActed) {
+      obs = buildObservation(this.game!, this.playerId!);
+    }
 
     // 3) 阶段动作
     const key = phaseKey(game);
@@ -668,8 +697,10 @@ export class AgentClient {
       const text = oneLine(message.text, 300);
       if (!text) continue;
       if (message.channel === "public" && publicSent < MAX_PUBLIC_MESSAGES_PER_TURN) {
+        // 没有公开群时不硬编码假群 ID，否则服务端会拒绝并反复重试
+        if (!obs.publicGroupId) continue;
         this.emit("sendGroupMessage", {
-          groupId: obs.publicGroupId ?? PUBLIC_GROUP_ID,
+          groupId: obs.publicGroupId,
           text,
           clientTempId: `agent-${this.cfg.index}-pub-${Date.now()}-${total}`,
         });
@@ -711,8 +742,10 @@ export class AgentClient {
   }
 
   private sanitizeInvestmentPlan(plan: InvestmentPlan, obs: Observation): InvestmentPlan {
-    const maxCups = Math.max(0, Math.floor(obs.me.wealth / 17));
-    const coffee = Math.min(Math.max(0, int(plan.coffee) ?? 0), maxCups);
+    // 可用财富 = 账面 − 已发出未确认转账；咖啡与再转账都不能超过它
+    const availableWealth = Math.max(0, obs.me.wealth - (obs.me.pendingOut ?? 0));
+    const maxCups = Math.max(0, Math.floor(availableWealth / COFFEE_WEALTH_COST));
+    const coffee = Math.min(Math.max(0, int(plan.coffee) ?? 0), maxCups, 3);
 
     let useCard = plan.useCard ?? null;
     if (useCard) {
@@ -753,7 +786,8 @@ export class AgentClient {
     if (transfer) {
       const amount = int(transfer.amount) ?? 0;
       const to = obs.players.find((p) => p.id === transfer!.toPlayerId);
-      if (!to || to.isMe || amount <= 0 || amount > obs.me.wealth) transfer = null;
+      const transferBudget = Math.max(0, availableWealth - coffee * COFFEE_WEALTH_COST);
+      if (!to || to.isMe || amount <= 0 || amount > transferBudget) transfer = null;
       else transfer = { ...transfer, amount };
     }
 
@@ -841,7 +875,11 @@ export class AgentClient {
     if (this.auctionDecisionKeys.has(decisionKey)) return false;
     this.auctionDecisionKeys.add(decisionKey);
 
-    const maxBid = Math.max(0, Math.floor(obs.me.wealth * this.runtime.auctionMaxWealthRatio));
+    const availableWealth = Math.max(0, obs.me.wealth - (obs.me.pendingOut ?? 0));
+    const maxBid = Math.max(
+      0,
+      Math.floor(availableWealth * this.runtime.auctionMaxWealthRatio)
+    );
     const minNext = game.auctionMinimumNextBid ?? game.auctionStartingBid ?? 5;
 
     this.auctionDecisionsByLot.set(lotKey, decisions + 1);
@@ -866,7 +904,13 @@ export class AgentClient {
 
     if (result.plan.action === "bid") {
       const amount = int(result.plan.amount) ?? 0;
-      if (amount >= minNext && amount <= maxBid) {
+      // 用最新快照校验：模型思考期间可能已有别人加价，旧 minNext 会让出价被拒。
+      const latestGame = this.game;
+      const latestMin =
+        latestGame?.auctionMinimumNextBid ??
+        latestGame?.auctionStartingBid ??
+        minNext;
+      if (amount >= latestMin && amount <= maxBid) {
         await this.politeDelay(0.6);
         this.emit("playerPlaceAuctionBid", { amount });
         this.log.info(`出价 ${amount}`);
@@ -877,7 +921,9 @@ export class AgentClient {
         });
         return true;
       }
-      this.log.warn(`出价 ${amount} 无效（最低 ${minNext} / 上限 ${maxBid}），改为放弃`);
+      // 不要立刻标记 pass：并发出价被拒后，下一帧仍有新的最低价，可再试一次。
+      this.log.warn(`出价 ${amount} 无效（最低 ${latestMin} / 上限 ${maxBid}），等待下一次机会`);
+      return false;
     }
 
     this.passedLots.add(lotKey);
@@ -947,28 +993,29 @@ export class AgentClient {
   }
 
   private recordSettlementOutcome(obs: Observation): void {
-    if (this.outcomeRecordedForRound.has(obs.globalRound)) return;
-    this.outcomeRecordedForRound.add(obs.globalRound);
-    const last = obs.settlementHistory[obs.settlementHistory.length - 1];
-    let ownGain = 0;
-    let ownInvested = 0;
-    if (last && last.round === obs.globalRound) {
+    // 一次 gameUpdate 可能跨过多轮（重连/卡顿），把尚未记录的轮次都补上，
+    // 而不是只记录 settlementHistory 的最后一条。
+    for (const last of obs.settlementHistory) {
+      if (this.outcomeRecordedForRound.has(last.round)) continue;
+      this.outcomeRecordedForRound.add(last.round);
+      let ownGain = 0;
+      let ownInvested = 0;
       for (const res of last.results) {
         ownInvested += res.playerInvestments[obs.me.id] ?? 0;
         ownGain += res.playerGains[obs.me.id]?.total ?? 0;
       }
+      this.memory.record(
+        "outcome",
+        `第 ${last.round} 轮结算：财富 ${obs.me.wealth}，排名 ${obs.me.rank}` +
+          (ownInvested || ownGain ? `；本轮投入 ${ownInvested}，收益 ${ownGain}` : ""),
+        {
+          globalRound: last.round,
+          era: obs.era,
+          roundInEra: obs.roundInEra,
+          data: { wealth: obs.me.wealth, rank: obs.me.rank, ownInvested, ownGain },
+        }
+      );
     }
-    this.memory.record(
-      "outcome",
-      `第 ${obs.globalRound} 轮结算：财富 ${obs.me.wealth}，排名 ${obs.me.rank}` +
-        (ownInvested || ownGain ? `；本轮投入 ${ownInvested}，收益 ${ownGain}` : ""),
-      {
-        globalRound: obs.globalRound,
-        era: obs.era,
-        roundInEra: obs.roundInEra,
-        data: { wealth: obs.me.wealth, rank: obs.me.rank, ownInvested, ownGain },
-      }
-    );
   }
 
   private recordFinalOutcome(obs: Observation): void {
@@ -1050,6 +1097,7 @@ export class AgentClient {
 
   close(): void {
     if (this.tickTimer) clearTimeout(this.tickTimer);
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.socket.close();
   }
 }

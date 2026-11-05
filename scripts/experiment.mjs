@@ -162,14 +162,15 @@ const baseEnv = {
   EXPERIMENT_MANIFEST_ID: runId,
   EXPERIMENT_MANIFEST_PATH: manifestPath,
   EXPERIMENT_MOCK: args.mock ? "1" : "0",
-  AGENT_PROMPT_VERSION: process.env.AGENT_PROMPT_VERSION || "v3-neutral-2026-11",
+  AGENT_PROMPT_VERSION:
+    process.env.AGENT_PROMPT_VERSION || envFile.AGENT_PROMPT_VERSION || "v3-neutral-2026-11",
   AGENT_AUTO_START: "true",
   AGENT_AUTO_RESTART: "true",
   AGENT_GAME_LIMIT: String(args.games),
   AGENT_CHAT_ENABLED: args.chat ? "true" : "false",
   AGENT_MEMORY_ENABLED: args.memory ? "true" : "false",
   AGENT_PREDICTION_ENABLED: args.prediction ? "true" : "false",
-  AGENT_LOG_LEVEL: process.env.AGENT_LOG_LEVEL || "info",
+  AGENT_LOG_LEVEL: process.env.AGENT_LOG_LEVEL || envFile.AGENT_LOG_LEVEL || "info",
   SERVER_STARTED_AT: String(Date.now()),
 };
 
@@ -219,9 +220,19 @@ const manifest = {
   promptHash: promptHash(),
   models: modelList,
   providers: providerList,
-  temperature: Number(baseEnv.AGENT_TEMPERATURE || envFile.AGENT_TEMPERATURE || 0.7),
-  tokenBudget: Number(baseEnv.AGENT_TOKEN_BUDGET || envFile.AGENT_TOKEN_BUDGET || 400000),
-  maxRetries: Number(baseEnv.AGENT_MAX_RETRIES || envFile.AGENT_MAX_RETRIES || 3),
+  // 0 也是合法取值，不能用 || 回退成默认值
+  temperature: Number.isFinite(Number(baseEnv.AGENT_TEMPERATURE))
+    ? Number(baseEnv.AGENT_TEMPERATURE)
+    : 0.7,
+  tokenBudget: Number.isFinite(Number(baseEnv.AGENT_TOKEN_BUDGET))
+    ? Number(baseEnv.AGENT_TOKEN_BUDGET)
+    : 400000,
+  maxRetries: Number.isFinite(Number(baseEnv.AGENT_MAX_RETRIES))
+    ? Number(baseEnv.AGENT_MAX_RETRIES)
+    : 3,
+  joinTimeoutMs: Number.isFinite(Number(baseEnv.AGENT_JOIN_TIMEOUT_MS))
+    ? Number(baseEnv.AGENT_JOIN_TIMEOUT_MS)
+    : 90000,
   chatEnabled: args.chat,
   memoryEnabled: args.memory,
   predictionEnabled: args.prediction,
@@ -235,6 +246,9 @@ const manifest = {
 };
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
 baseEnv.EXPERIMENT_PROMPT_HASH = manifest.promptHash;
+// 把 manifest 里的代码版本写进服务端环境，确保 session meta.gitCommit 与 manifest 一致。
+// 之前这里漏传，导致每个 session 的 meta.gitCommit 为 null。
+baseEnv.GIT_COMMIT = manifest.gitCommit || "";
 console.log(`[experiment] manifest: ${manifestPath}`);
 
 if (!args.mock) {
@@ -302,6 +316,107 @@ try {
 }
 fs.writeFileSync(path.join(runDir, "sessions.json"), JSON.stringify({ runId, sessions }, null, 2), "utf8");
 
+// 自动 QC：把实验手册里的检查项落成 qc.csv，避免每局手工核对。
+const qcRows = [];
+for (const s of sessions) {
+  const snap = s.snapshot;
+  const meta = snap?.meta ?? {};
+  const problems = [];
+  const warnings = [];
+  if (!snap) problems.push("no_snapshot");
+  const players = snap?.players ?? [];
+  if (players.length !== 6) problems.push("player_count");
+  const finished = meta.phase === "GAME_OVER" || meta.phase === "COMMUNITY_NAMING";
+  if (!finished) problems.push("not_finished");
+  if (meta.globalRound !== 8) problems.push("global_round");
+  if (meta.currentEra !== 4) problems.push("current_era");
+  if (meta.roundInEra !== 2) problems.push("round_in_era");
+
+  const predictions = snap?.predictions ?? [];
+  if (args.prediction) {
+    for (const p of players) {
+      const eras = new Set(predictions.filter((x) => x.playerId === p.id).map((x) => x.era));
+      if (eras.size < 4) {
+        problems.push(`predictions:${p.name}`);
+        break;
+      }
+    }
+    if (predictions.length === 0) problems.push("no_predictions");
+  }
+
+  const groupMessages = snap?.groupMessages ?? [];
+  const directMessages = snap?.directMessages ?? [];
+  if (args.chat) {
+    if (groupMessages.length === 0) warnings.push("no_public_chat");
+    if (directMessages.length === 0) warnings.push("no_private_chat");
+  }
+  if ((snap?.agentDecisions ?? []).length === 0) warnings.push("no_agent_decisions");
+
+  // token：按 Agent 汇总 agentDecisions.totalTokens
+  const tokenByPlayer = new Map();
+  for (const d of snap?.agentDecisions ?? []) {
+    if (typeof d.totalTokens !== "number") continue;
+    tokenByPlayer.set(d.playerId, (tokenByPlayer.get(d.playerId) ?? 0) + d.totalTokens);
+  }
+  for (const [pid, total] of tokenByPlayer) {
+    if (total > Number(baseEnv.AGENT_TOKEN_BUDGET || 400000)) {
+      const name = players.find((p) => p.id === pid)?.name ?? pid;
+      problems.push(`token_budget:${name}`);
+    }
+  }
+
+  if (meta.mock === true) warnings.push("mock_data");
+
+  qcRows.push({
+    sessionId: s.sessionId ?? "",
+    runId,
+    condition: meta.condition ?? args.condition,
+    seedBase: meta.seedBase ?? "",
+    seed: meta.seed ?? "",
+    playerCount: players.length,
+    phase: meta.phase ?? "",
+    currentEra: meta.currentEra ?? "",
+    roundInEra: meta.roundInEra ?? "",
+    globalRound: meta.globalRound ?? "",
+    predictions: predictions.length,
+    publicMessages: groupMessages.length,
+    privateMessages: directMessages.length,
+    agentDecisions: (snap?.agentDecisions ?? []).length,
+    mock: meta.mock === true,
+    valid: problems.length === 0,
+    reasons: problems.join("|"),
+    warnings: warnings.join("|"),
+  });
+}
+const qcHeaders = Object.keys(
+  qcRows[0] ?? {
+    sessionId: "",
+    runId: "",
+    condition: "",
+    seedBase: "",
+    seed: "",
+    playerCount: "",
+    phase: "",
+    currentEra: "",
+    roundInEra: "",
+    globalRound: "",
+    predictions: "",
+    publicMessages: "",
+    privateMessages: "",
+    agentDecisions: "",
+    mock: "",
+    valid: "",
+    reasons: "",
+    warnings: "",
+  }
+);
+const qcCsv = [
+  qcHeaders.join(","),
+  ...qcRows.map((row) => qcHeaders.map((h) => csvEscape(row[h])).join(",")),
+].join("\n");
+const qcPath = path.join(runDir, "qc.csv");
+fs.writeFileSync(qcPath, `${qcCsv}\n`, "utf8");
+
 const flatRows = [];
 for (const s of sessions) {
   const metrics = s.snapshot?.metrics;
@@ -311,7 +426,12 @@ for (const s of sessions) {
     flatRows.push({
       sessionId: s.sessionId,
       condition: meta.condition ?? args.condition,
+      seedBase: meta.seedBase ?? "",
       seed: meta.seed ?? "",
+      sessionOrdinal: meta.sessionOrdinal ?? "",
+      promptVersion: meta.promptVersion ?? "",
+      promptHash: meta.promptHash ?? meta.experiment?.promptHash ?? "",
+      gitCommit: meta.gitCommit ?? meta.experiment?.gitCommit ?? "",
       player: p.name,
       agentIndex: p.agentIndex ?? "",
       provider: p.provider,
@@ -323,11 +443,25 @@ for (const s of sessions) {
       riskShare: p.riskShare,
       transfersSent: p.transfersSent,
       transfersReceived: p.transfersReceived,
+      transferAmountSent: p.transferAmountSent,
+      transferAmountReceived: p.transferAmountReceived,
       publicMessages: p.publicMessages,
       privateMessages: p.privateMessages,
+      privatePartners: p.privatePartners,
+      auctionBids: p.auctionBids,
+      auctionWins: p.auctionWins,
+      auctionSpend: p.auctionSpend,
+      buffsUsed: p.buffsUsed,
+      attacksInitiated: p.attacksInitiated,
+      attacksReceived: p.attacksReceived,
       predictionTau: p.predictionTau ?? "",
       predictionMae: p.predictionMae ?? "",
+      outDegree: p.outDegree,
+      inDegree: p.inDegree,
       gini: metrics.game.gini,
+      giniNonNegative: metrics.game.giniNonNegative ?? "",
+      negativeWealthPlayers: metrics.game.negativeWealthPlayers ?? "",
+      finalized: metrics.game.finalized ?? "",
     });
   }
 }
@@ -335,7 +469,12 @@ const headers = Object.keys(
   flatRows[0] ?? {
     sessionId: "",
     condition: "",
+    seedBase: "",
     seed: "",
+    sessionOrdinal: "",
+    promptVersion: "",
+    promptHash: "",
+    gitCommit: "",
     player: "",
     agentIndex: "",
     provider: "",
@@ -347,11 +486,25 @@ const headers = Object.keys(
     riskShare: "",
     transfersSent: "",
     transfersReceived: "",
+    transferAmountSent: "",
+    transferAmountReceived: "",
     publicMessages: "",
     privateMessages: "",
+    privatePartners: "",
+    auctionBids: "",
+    auctionWins: "",
+    auctionSpend: "",
+    buffsUsed: "",
+    attacksInitiated: "",
+    attacksReceived: "",
     predictionTau: "",
     predictionMae: "",
+    outDegree: "",
+    inDegree: "",
     gini: "",
+    giniNonNegative: "",
+    negativeWealthPlayers: "",
+    finalized: "",
   }
 );
 const csv = [
@@ -372,6 +525,8 @@ const runSummary = {
   manifestPath,
   sessionsPath: path.join(runDir, "sessions.json"),
   summaryCsvPath: path.join(runDir, "summary.csv"),
+  qcPath,
+  qcFailures: qcRows.filter((r) => !r.valid).length,
 };
 fs.writeFileSync(path.join(runDir, "run.json"), JSON.stringify(runSummary, null, 2), "utf8");
 
@@ -385,6 +540,7 @@ console.log(`agents exit : ${exitCode}`);
 console.log(`manifest    : ${manifestPath}`);
 console.log(`sessions    : ${runSummary.sessionsPath}`);
 console.log(`summary.csv : ${runSummary.summaryCsvPath}`);
+console.log(`qc.csv      : ${qcPath}（${runSummary.qcFailures} 局未通过）`);
 
 if (exitCode !== 0) process.exit(2);
 if (sessions.length < args.games) process.exit(3);

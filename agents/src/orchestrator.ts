@@ -40,6 +40,7 @@ export class Orchestrator {
 
   private restartScheduled = false;
   private completedSessionIds = new Set<string>();
+  private joinDeadlineAt = 0;
 
   constructor(runtime: RuntimeConfig, hooks: OrchestratorHooks = {}) {
     this.runtime = runtime;
@@ -68,6 +69,7 @@ export class Orchestrator {
       return;
     }
     this.connectAdmin();
+    this.joinDeadlineAt = Date.now() + this.runtime.joinTimeoutMs;
     this.pollTimer = setInterval(() => void this.poll(), 1000);
   }
 
@@ -116,7 +118,15 @@ export class Orchestrator {
     if (this.adminGame) this.onAdminGame(this.adminGame);
 
     const allJoined = this.agents.every((a) => a.isJoined);
-    if (!allJoined) return;
+    if (!allJoined) {
+      if (this.joinDeadlineAt > 0 && Date.now() > this.joinDeadlineAt) {
+        const missing = this.agents.filter((a) => !a.isJoined).map((a) => `#${a.index}`);
+        this.fail(0, `等待 Agent 就座超时（未入座：${missing.join(", ") || "未知"}）`);
+      }
+      return;
+    }
+    // 首次全员就座后解除启动超时；中途掉线由连接恢复/失败策略处理，不在这里误杀
+    this.joinDeadlineAt = 0;
 
     if (!this.adminReady) {
       this.agents.forEach((a) => a.requestState());

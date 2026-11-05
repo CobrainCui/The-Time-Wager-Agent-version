@@ -249,7 +249,7 @@ export function buildAuctionPrompt(
     `当前最高价：${obs.auction?.currentBid ?? 0}`,
     `最低下一口：${obs.auction?.minimumNextBid ?? 5}`,
     `最高出价者：${obs.auction?.highBidderName ?? "无"}`,
-    `你的财富：${obs.me.wealth}（本局统一上限：可用财富的 ${Math.round((maxBid / Math.max(1, obs.me.wealth)) * 100)}%，即 ${maxBid}）`,
+    `你的财富：${obs.me.wealth}（本局统一上限：可用财富的 ${Math.round((maxBid / Math.max(1, obs.me.wealth - obs.me.pendingOut)) * 100)}%，即 ${maxBid}）`,
     `你的手牌：${obs.me.inventory.length ? obs.me.inventory.join(", ") : "无"}`,
     `最近出价：${history || "无"}`,
     "",

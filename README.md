@@ -196,7 +196,7 @@ npm run experiment -- --condition C2 --games 3 --seed 20261104
 1. 构建三端（可加 `--no-build` 跳过）；
 2. 生成 `experiments/<runId>/manifest.json`（条件、种子、模型、提示词版本、git commit、token 预算等）；
 3. 启动 server + agents，自动跑 N 局；
-4. 结束后把本次 run 的归档写入 `sessions.json`，并生成 `summary.csv`；
+4. 结束后把本次 run 的归档写入 `sessions.json`，并生成 `summary.csv` 与自动 QC `qc.csv`；
 5. 任一 Agent 模型失败 → 退出码 2，本局标记失败，不继续。
 
 ### 6.3 交互式本地运行
@@ -237,6 +237,8 @@ npm run analyze -- --exclude-mock --out analysis/2026-11-04
 输出：
 
 - `dataset.csv`：每局每玩家一行；
+- `summary.csv`：每局每玩家一行；
+- `qc.csv`：每局自动 QC（人数、轮次、预测、聊天、token、mock 标记）；
 - `condition_summary.csv`：每条件均值 + 局内分化；
 - `prediction_by_era.csv`：按时代的预测 τ/MAE；
 - `summary.json`：机器可读汇总。
@@ -289,6 +291,7 @@ npm run analyze -- --exclude-mock --out analysis/2026-11-04
 |------|------|----------|
 | 已完成场次归档 | `server/data/session_archive.json` | 否 |
 | 实验 run | `experiments/<runId>/` | 否 |
+| 自动 QC | `experiments/<runId>/qc.csv` | 否 |
 | Agent 运行日志 | `logs/agents-*.jsonl` | 否 |
 | Agent 记忆 | `logs/memory/<runId>/agent-n-*.jsonl` | 否 |
 | 管理端构建 | `frontend/dist/` | 否 |
@@ -321,6 +324,7 @@ npm run analyze -- --exclude-mock --out analysis/2026-11-04
 | 每时代排名预测 | ✅ 每局 24 条（6 Agent × 4 时代） |
 | 可复现种子 | ✅ 同 seed 派生局种子、时代顺序、项目发牌 |
 | 实验 manifest / N 局 / summary.csv | ✅ |
+| 自动 QC（`qc.csv`） | ✅ 人数/轮次/预测/聊天/决策/token/mock |
 | token 预算 | ✅ 超限终止 |
 | 玩家视角隐藏 Agent 标签 | ✅ |
 | 管理员分析视图 | ✅ 条件/种子/模型/指标/预测评分 |
@@ -352,8 +356,9 @@ npm run analyze -- --exclude-mock --out analysis/2026-11-04
 | 现象 | 排查 |
 |------|------|
 | `API Key 未填写或仍是占位值` | 这是预期行为：填 `.env` 的 6 个 Key；或先用 `--mock` 冒烟 |
-| `AGENT_DEFAULT_MODEL` 为空 | 设置 `AGENT_DEFAULT_MODEL` 或每个 `AGENT_n_MODEL` |
-| 实验退出码 2 | 模型调用失败/输出语义无效/token 超限；看 `logs/agents-*.jsonl` |
+| `AGENT_DEFAULT_MODEL` 为空 | 设置 `AGENT_DEFAULT_MODEL`，或给 6 个 Agent 分别设置 `AGENT_<n>_MODEL` |
+| 启动后 90s 仍未开局 | 检查是否有 Agent 未入座（昵称冲突 / Key 缺失 / 服务端未启动）；可用 `AGENT_JOIN_TIMEOUT_MS` 调整 |
+| 实验退出码 2 | 模型调用失败/输出语义无效/token 超限/就座超时；看 `logs/agents-*.jsonl` |
 | 退出码 3 | 完成的局数少于请求局数；看 `experiments/<runId>/run.json` |
 | 3001 端口被占用 | `Get-NetTCPConnection -LocalPort 3001`；先结束旧 node 进程 |
 | 管理端登录超时 | 检查 `ADMIN_TOKEN` 是否与根 `.env` 一致；服务端是否已构建 |
@@ -384,6 +389,7 @@ npm run experiment -- --mock --games 1 --condition smoke --no-build
 
 | 文档 | 内容 |
 |------|------|
+| [`审查与修复.md`](./审查与修复.md) | 2026-11 对 Agent 运行时、导出元数据、指标口径的审查与修复记录 |
 | [`实验手册.md`](./实验手册.md) | 研究问题、条件、流程、样本量、分析计划、检查清单 |
 | [`数据字典.md`](./数据字典.md) | 导出字段、事件类型、指标定义、分析建议 |
 | [`计划修改.md`](./计划修改.md) | 对原立项计划的逐条质疑与修订 |
