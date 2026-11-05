@@ -113,6 +113,8 @@ export function useBuffCard(
     extraData: params.extraData,
   };
   let roundPlayEnergyDeltas: { playerId: string; delta: number }[] = [];
+  let convertedSlackPlayIds: string[] = [];
+  let passiveWorkRestInstanceId: string | undefined;
 
   if (cardId === SLACK_CARD_ID) {
     const target = game.players.find((p) => p.id === params.targetPlayerId);
@@ -121,6 +123,9 @@ export function useBuffCard(
     let slackInvestmentAutoUnlocked = false;
     const workRestActive = hasWorkRest(target);
     if (workRestActive) {
+      passiveWorkRestInstanceId = target.activeBuffs.find(
+        (b) => b.cardId === WORK_REST_CARD_ID
+      )?.instanceId;
       target.energy += SLACK_ENERGY_DELTA;
       effect.energyDelta = SLACK_ENERGY_DELTA;
       effect.energyAfter = target.energy;
@@ -170,6 +175,7 @@ export function useBuffCard(
       energyDelta: workRestActive ? SLACK_ENERGY_DELTA : -SLACK_ENERGY_DELTA,
       energyAfter: target.energy,
       ...(slackInvestmentAutoUnlocked ? { investmentAutoUnlocked: true } : {}),
+      sourcePlayId: playId,
     });
     notifyTargetId = target.id;
     // 自用摸鱼：不 push slack hit（含劳逸结合 +8）；弹窗靠 pendingSlackHits，说明在 result.msg
@@ -188,22 +194,67 @@ export function useBuffCard(
     const targetId = params.targetPlayerId ?? player.id;
     const target = game.players.find((p) => p.id === targetId);
     if (!target) return { success: false, msg: "未指定目标玩家" };
+    if (hasWorkRest(target)) {
+      return { success: false, msg: "目标本轮已有劳逸结合，无需重复使用" };
+    }
 
-    const pending = Math.max(target.slackEnergyLost?.length ?? 0, target.slackedBy?.length ?? 0);
+    const pendingSlackPlays = (game.roundBuffPlays ?? []).filter(
+      (p) =>
+        !p.voided &&
+        p.cardId === SLACK_CARD_ID &&
+        p.targetPlayerId === target.id &&
+        !p.convertedByPlayId
+    );
     let restored = 0;
-    if (pending > 0) {
-      const lost = target.slackEnergyLost ?? [];
-      for (let i = 0; i < pending; i++) {
-        const deducted = lost[i] ?? SLACK_ENERGY_DELTA;
+    if (pendingSlackPlays.length > 0) {
+      for (const slackPlay of pendingSlackPlays) {
+        const delta =
+          slackPlay.energyDeltas.find((d) => d.playerId === target.id)?.delta ??
+          -SLACK_ENERGY_DELTA;
+        const deducted = Math.max(0, -delta);
         restored += deducted + SLACK_ENERGY_DELTA;
+        slackPlay.convertedByPlayId = playId;
+        convertedSlackPlayIds.push(slackPlay.playId);
       }
       target.energy += restored;
-      target.slackedBy = [];
-      target.slackEnergyLost = [];
-      target.pendingSlackHits = [];
+      // 只保留仍未改判的摸鱼，供后续劳逸结合/打火机精确处理
+      const remaining = (game.roundBuffPlays ?? []).filter(
+        (p) =>
+          !p.voided &&
+          p.cardId === SLACK_CARD_ID &&
+          p.targetPlayerId === target.id &&
+          !p.convertedByPlayId
+      );
+      target.slackedBy = remaining.map((p) => p.ownerId);
+      target.slackEnergyLost = remaining.map((p) => {
+        const delta =
+          p.energyDeltas.find((d) => d.playerId === target.id)?.delta ??
+          -SLACK_ENERGY_DELTA;
+        return Math.max(0, -delta);
+      });
+      target.pendingSlackHits = (target.pendingSlackHits ?? []).filter(
+        (h) => !convertedSlackPlayIds.includes(h.sourcePlayId ?? "")
+      );
       effect.restoredEnergy = restored;
-      effect.slackHitsResolved = pending;
+      effect.slackHitsResolved = pendingSlackPlays.length;
       effect.energyAfter = target.energy;
+    } else {
+      // 旧局/异常数据没有 roundBuffPlays 时的兼容路径
+      const pending = Math.max(target.slackEnergyLost?.length ?? 0, target.slackedBy?.length ?? 0);
+      if (pending > 0) {
+        const lost = target.slackEnergyLost ?? [];
+        for (let i = 0; i < pending; i++) {
+          const deducted = lost[i] ?? SLACK_ENERGY_DELTA;
+          restored += deducted + SLACK_ENERGY_DELTA;
+        }
+        target.energy += restored;
+        target.slackedBy = [];
+        target.slackEnergyLost = [];
+        target.pendingSlackHits = [];
+        effect.restoredEnergy = restored;
+        effect.slackHitsResolved = pending;
+        effect.energyAfter = target.energy;
+      }
     }
 
     ensureWorkRestPassive(target, playId);
@@ -213,22 +264,23 @@ export function useBuffCard(
       roundPlayEnergyDeltas = [{ playerId: target.id, delta: restored }];
     }
 
-    const passiveHint = "本卡生效轮次内被摸鱼传染 +8 精力"; // 用语同 buffCards BUFF_COPY_*
+    const passiveHint = "本卡生效轮次内被摸鱼传染 +8 精力";
+    const resolvedSlackHits = Number(effect.slackHitsResolved ?? 0);
     if (target.id === player.id) {
-      if (pending > 0) {
-        usedText = `为自己发动劳逸结合（改判 ${pending} 次摸鱼，精力 +${restored}；${passiveHint}）`;
+      if (resolvedSlackHits > 0) {
+        usedText = `为自己发动劳逸结合（改判 ${resolvedSlackHits} 次摸鱼，精力 +${restored}；${passiveHint}）`;
         game.logs.push(
-          `⚖️ ${player.name} 为自己发动【劳逸结合】，改判 ${pending} 次摸鱼（精力 +${restored}）`
+          `⚖️ ${player.name} 为自己发动【劳逸结合】，改判 ${resolvedSlackHits} 次摸鱼（精力 +${restored}）`
         );
       } else {
         usedText = `为自己发动劳逸结合（${passiveHint}）`;
         game.logs.push(`⚖️ ${player.name} 为自己发动【劳逸结合】`);
       }
     } else {
-      if (pending > 0) {
+      if (resolvedSlackHits > 0) {
         usedText = `对 ${target.name} 发动劳逸结合（改判摸鱼，其精力 +${restored}；${passiveHint}）`;
         game.logs.push(
-          `⚖️ ${player.name} 对 ${target.name} 发动【劳逸结合】，改判 ${pending} 次摸鱼（精力 +${restored}）`
+          `⚖️ ${player.name} 对 ${target.name} 发动【劳逸结合】，改判 ${resolvedSlackHits} 次摸鱼（精力 +${restored}）`
         );
       } else {
         usedText = `对 ${target.name} 发动劳逸结合（${passiveHint}）`;
@@ -237,7 +289,7 @@ export function useBuffCard(
       hitNote = {
         cardId: WORK_REST_CARD_ID,
         role: "hit",
-        text: `${player.name} 为你发动了劳逸结合，${passiveHint}${pending > 0 ? `（改判摸鱼，精力 +${restored}）` : ""}`,
+        text: `${player.name} 为你发动了劳逸结合，${passiveHint}${resolvedSlackHits > 0 ? `（改判摸鱼，精力 +${restored}）` : ""}`,
       };
       notifyTargetId = target.id;
       notifyTargetMsg = hitNote.text;
@@ -294,6 +346,10 @@ export function useBuffCard(
       targetPlayerId: params.targetPlayerId,
       targetProjectId: params.targetProjectId,
       energyDeltas: roundPlayEnergyDeltas,
+      ...(passiveWorkRestInstanceId ? { passiveWorkRestInstanceId } : {}),
+      ...(convertedSlackPlayIds.length > 0
+        ? { convertedSlackPlayIds: [...convertedSlackPlayIds] }
+        : {}),
     });
   }
 
@@ -351,7 +407,12 @@ export function useForceBuyCard(
   if (cardIndex === -1) return { success: false, msg: "你没有强买强卖" };
 
   if ((game.forceBuyUsedPlayerIds ?? []).includes(playerId)) {
-    return { success: false, msg: "该卡牌（强买强卖）只能用一次" };
+    // 旧局兼容：过去按“每人每场一次”记录；新规则默认整局仅一张，用掉即消耗。
+    // 若管理端补发了额外副本，以手牌是否仍有该卡为准，不再被旧标记拦住。
+    const legacyOnlyBlock = !player.inventory.includes(FORCE_BUY_CARD_ID);
+    if (legacyOnlyBlock) {
+      return { success: false, msg: "该卡牌（强买强卖）只能用一次" };
+    }
   }
 
   const focusId = game.auctionFocusCardId;
@@ -367,8 +428,9 @@ export function useForceBuyCard(
   player.inventory.push(focusId);
   markAuctionCardDistributed(game, focusId);
   recordAuctionCompletedDeal(game, focusId, player.id, 0, "force_buy");
+  // 仅作历史记录；新规则以手牌副本为准，不再用该标记阻止管理端补发后的再次使用
   if (!game.forceBuyUsedPlayerIds) game.forceBuyUsedPlayerIds = [];
-  game.forceBuyUsedPlayerIds.push(playerId);
+  if (!game.forceBuyUsedPlayerIds.includes(playerId)) game.forceBuyUsedPlayerIds.push(playerId);
   afterForceBuyOnFocus(game, focusId);
 
   const focusName = buffCards.find((c) => c.id === focusId)?.name || focusId;

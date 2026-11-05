@@ -36,6 +36,7 @@
 - 一个可复现、可审计的多 Agent 社会博弈实验台。
 - 6 个 Agent 各自持有独立 Socket 连接、独立上下文、独立记忆文件，进入同一房间。
 - 一局 8 轮，含 3 场拍卖；玩家间可公开聊天、私聊、转账、使用干扰卡。
+- 彩票与产品版同规则：服务端线上随机掷骰（random.org 失败退回加密随机），随机源与点数写入导出。
 - 管理端保留上帝视角：看局面、看预测与决策、控场、导出 JSON + XLSX。
 
 **不是：**
@@ -157,13 +158,22 @@ AGENT_2_PROVIDER=deepseek
 规则：
 
 - **不填 Key / 仍是 placeholder → agents 启动时直接报错退出**，不会跑出一局假数据。
-- `AGENT_n_BASE_URL` 不填时使用 OpenAI 官方；`AGENT_n_MODEL` 不能为空。
+- `AGENT_n_BASE_URL` 不填时使用 OpenAI 官方；`AGENT_n_MODEL` 留空则使用 `AGENT_DEFAULT_MODEL`。
+- 逐 Agent 的 `AGENT_n_MODEL` **优先于** `AGENT_DEFAULT_MODEL`；混模型实验才逐个填。
 - `AGENT_n_PROVIDER` 只用于导出与 manifest；不填时从 BASE_URL 主机名推断。
 - 所有 Agent 使用同一个 `AGENT_TEMPERATURE`。不要给单个 Agent 单独设温度，否则 harness 不再一致。
 - `AGENT_TOKEN_BUDGET` 是每 Agent 每局上限；超限终止本局。
 - `AGENT_MAX_RETRIES` 是网络/JSON 重试次数；重试耗尽仍失败 → 终止本局。
 
 完整变量见 `.env.example`。
+
+填完后先自检（不会打印完整 Key）：
+
+```bash
+npm run build
+npm run check-ai
+npm run check-ai -- --ping   # 6 个 Agent 各实际调用一次
+```
 
 ---
 
@@ -187,8 +197,8 @@ npm run experiment -- --condition C1 --games 5 --seed 20261104
 # 例：C0 基线（关闭聊天）
 npm run experiment -- --condition C0 --games 5 --seed 20261104 --no-chat
 
-# 例：混模型条件（在 .env 里给 6 个 Agent 配不同供应商/模型）
-npm run experiment -- --condition C2 --games 3 --seed 20261104
+# 例：混模型条件（在 .env 里给 6 个 Agent 配不同供应商/模型；C2 按手册关闭聊天）
+npm run experiment -- --condition C2 --games 3 --seed 20261104 --no-chat
 ```
 
 运行器会：
@@ -197,7 +207,10 @@ npm run experiment -- --condition C2 --games 3 --seed 20261104
 2. 生成 `experiments/<runId>/manifest.json`（条件、种子、模型、提示词版本、git commit、token 预算等）；
 3. 启动 server + agents，自动跑 N 局；
 4. 结束后把本次 run 的归档写入 `sessions.json`，并生成 `summary.csv` 与自动 QC `qc.csv`；
-5. 任一 Agent 模型失败 → 退出码 2，本局标记失败，不继续。
+5. 任一 Agent 模型失败 → 退出码 2，本次 run 失败并保留日志；未归档的局不会出现在 `sessions.json`。
+
+> 不要同时开两个 `npm run experiment`：服务端是单实例、端口 3001，第二个 run 会连到第一个服务端并污染实验元数据。
+> 按 `Ctrl+C` 会清理子进程；server 异常退出时本次 run 会立即失败，不会静默等满超时。
 
 ### 6.3 交互式本地运行
 
@@ -221,6 +234,14 @@ npm start
 
 管理端由服务端托管：`http://localhost:3001/admin.html`。
 
+**只想查看历史/导出、不想再跑 AI**：只启动服务端，不要用 `npm start`（它会同时启动 agents）：
+
+```bash
+npm run server
+```
+
+然后打开 `http://localhost:3001/admin.html`，用 `.env` 里的 `ADMIN_TOKEN` 登录。
+
 ### 6.5 批量分析
 
 ```bash
@@ -234,14 +255,14 @@ npm run analyze -- --run finalcheck-424242-2026-11-04_03-40-18-687
 npm run analyze -- --exclude-mock --out analysis/2026-11-04
 ```
 
-输出：
+输出（`analyze` 只写这 4 个文件）：
 
 - `dataset.csv`：每局每玩家一行；
-- `summary.csv`：每局每玩家一行；
-- `qc.csv`：每局自动 QC（人数、轮次、预测、聊天、token、mock 标记）；
 - `condition_summary.csv`：每条件均值 + 局内分化；
 - `prediction_by_era.csv`：按时代的预测 τ/MAE；
 - `summary.json`：机器可读汇总。
+
+`summary.csv` 与 `qc.csv` 是 `npm run experiment` 写到 `experiments/<runId>/` 的，不在 `analysis/` 输出目录里。
 
 `dataset.csv` 可直接导入 R/Python 做 bootstrap、混合效应模型或绘图。
 
@@ -328,7 +349,7 @@ npm run analyze -- --exclude-mock --out analysis/2026-11-04
 | token 预算 | ✅ 超限终止 |
 | 玩家视角隐藏 Agent 标签 | ✅ |
 | 管理员分析视图 | ✅ 条件/种子/模型/指标/预测评分 |
-| 服务端测试 | ✅ 262 / 262 |
+| 服务端测试 | ✅ 273 / 273 |
 | 三端构建 | ✅ |
 
 ### 仍需真实 Key 验证

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  createAuctionOffer,
   isAuctionCardAvailable,
   markAuctionCardDistributed,
   recordAuctionCompletedDeal,
@@ -63,7 +62,9 @@ describe("revokeAuctionGrant", () => {
     game.phase = "AUCTION";
     game.currentEra = 2;
     game.players = [player("p1")];
-    createAuctionOffer(game, "p1", "buff_gold", 15);
+    game.pendingAuctionOffers = [
+      { offerId: "legacy-offer-1", playerId: "p1", cardId: "buff_gold", cost: 15 },
+    ];
     assert.equal(game.pendingAuctionOffers?.length, 1);
 
     const result = revokeAuctionGrant(game, "buff_gold");
@@ -72,7 +73,9 @@ describe("revokeAuctionGrant", () => {
     assert.equal(game.pendingAuctionOffers?.length, 0);
     assert.equal(isAuctionCardAvailable(game, "buff_gold"), true);
 
-    createAuctionOffer(game, "p1", "buff_gold", 20);
+    game.pendingAuctionOffers = [
+      { offerId: "legacy-offer-2", playerId: "p1", cardId: "buff_gold", cost: 20 },
+    ];
     assert.equal(game.pendingAuctionOffers?.[0]?.cost, 20);
   });
 

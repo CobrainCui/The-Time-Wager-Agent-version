@@ -10,11 +10,13 @@
 | 咖啡精力增益 `COFFEE_ENERGY_GAIN` | 1 | logic/coffeeLogic.ts |
 
 ### 精力表（按开局在线人数定档，同代两轮相同）
+> 实验室固定 6 个 Agent 同桌，新局使用 **6 人档**；4/5 人档仅为旧局兼容。
+
 | 人数 | 轮1 | 轮2 | 轮3 | 轮4 |
 |---|---|---|---|---|
 | 6 人 | 15 | 13 | 11 | 9 |
-| 5 人 | 18 | 16 | 13 | 11 |
-| 4 人 | 23 | 20 | 16 | 13 |
+| 5 人（旧局兼容） | 18 | 16 | 13 | 11 |
+| 4 人（旧局兼容） | 23 | 20 | 16 | 13 |
 
 - 全场总精力守恒：4 人 = 576，5 人 = 580，6 人 = 576（不符则启动报错）。
 - 投资开始后才进房者本轮精力为 0。
@@ -34,7 +36,7 @@
 | 长期基础回报 | 累计投入 ×15（所有历史投资人） |
 | 风险基础回报 | 投入 ×20（成瘾/完美/幸福 ×25） |
 | 时代加成池 短/长 | 50 / 100 |
-| 点石成金倍率 | 1.5（向下取整，仅正项） |
+| 点石成金倍率 | 1.5（向下取整，仅项目/彩票/保险正项；梯度/退款/转账不放大） |
 | 保险赔付 | 100（有金 150） |
 | 长期放弃阈值 `LONG_CONTINUE_MIN_ENERGY` | 本轮投入 < 3 |
 | 第四时代梯度比例 | 1:1 / 1:5（≥1/3）/ 1:10（≥2/3） |
@@ -45,27 +47,28 @@
 | 起拍价 `AUCTION_STARTING_BID` | 5 |
 | 加价步长 `AUCTION_BID_INCREMENT` | 5 |
 | 拍卖场次 | 3 场（进 2/3/4 时代） |
-| 强买强卖 | 每张仅一次，免费拿焦点卡 |
+| 强买强卖 | 默认整局仅一张；每张仅一次，免费拿焦点卡 |
 
 ## 排名奖缩放（rankRewardSchedule.ts）
 - `resolveRankRewardTierCount`：1–3 人 → 5 人档；4 人 → 4 档；5 人 → 5 档；6 人 → 6 档。
 - `scaleRankRewardsForPlayerCount`：4/5 人时按权重 `(N−i)` 重新分配，**保持总池与 6 人版一致**且强制**非递增**（`enforceNonIncreasing`）。
 - 模块加载时 `assertCatalogRankRewards()` 断言所有图鉴卡缩放后 sum 与档位合规。
 
-## 群聊（默认关闭）
+## 群聊（产品版默认开启）
 | 常量 | 值 |
 |---|---|
-| `GROUP_CHAT_ENABLED` | false |
+| `GROUP_CHAT_ENABLED` | true |
 | 每玩家最多群数 `MAX_CUSTOM_GROUPS_PER_PLAYER` | 6 |
 | 每房最多群数 `MAX_CUSTOM_GROUPS_PER_ROOM` | 24 |
 | 每群最多消息 `MAX_MESSAGES_PER_GROUP` | 500 |
+| 单次广播每群上限 `MAX_MESSAGES_PER_VIEW` | 200 |
 | 禁建群阶段 | ROOM_WAITING / ERA_INTRO / TUTORIAL |
 
 ## 特性开关（config/features.ts 等）
 | 开关 | 默认 |
 |---|---|
-| `AI_BOT_ENABLED` | false |
-| `GROUP_CHAT_ENABLED` | false |
+| `GROUP_CHAT_ENABLED` | true（实验室固定开启） |
+| 开局人数 | 固定 6 个独立 AI Agent |
 | 教程页数 `TUTORIAL_SLIDE_COUNT` | 8 |
 | 教程最大步 `TUTORIAL_MAX_STEP` | 7 |
 | 人格立绘白名单 | Bridge / Moment / Navigator / Planter / Poet / Wave（对应 6 类命运素描） |
@@ -73,4 +76,4 @@
 ## 数据留存 / 导出
 - 行为数据走 `sessionTelemetry` 事件流；命局存 `server/data/session_archive.json`（唯一真相源）。
 - 社区财富榜由档案派生，不再单独落盘。
-- 导出 schema 版本 `exportSchemaVersion = 1.3.0`。
+- 导出 schema 版本 `exportSchemaVersion = 1.2.0`。

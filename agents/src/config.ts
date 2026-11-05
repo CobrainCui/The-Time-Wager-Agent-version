@@ -166,7 +166,7 @@ export function loadRuntimeConfig(): RuntimeConfig {
       0.9,
       Math.max(0.05, envNumber("AGENT_AUCTION_MAX_WEALTH_RATIO", 0.35))
     ),
-    tokenBudget: envNumber("AGENT_TOKEN_BUDGET", 400_000),
+    tokenBudget: envNumber("AGENT_TOKEN_BUDGET", 1_000_000),
     maxOutputTokens: envNumber("AGENT_MAX_OUTPUT_TOKENS", 1_200),
     maxRetries: Math.max(1, envNumber("AGENT_MAX_RETRIES", 3)),
     joinStaggerMs: Math.max(0, envNumber("AGENT_JOIN_STAGGER_MS", 350)),

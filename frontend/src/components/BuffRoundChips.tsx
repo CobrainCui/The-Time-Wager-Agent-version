@@ -6,9 +6,9 @@ import { socket } from "../socket";
 
 interface Props {
   me: Player;
-  /** 锁定、已进讨论队列、或非道具阶段时禁用摸鱼快捷按钮 */
+  /** 锁定、已进讨论队列、或非投资阶段时禁用摸鱼快捷按钮 */
   actionsDisabled?: boolean;
-  /** 仅道具阶段可发动快捷按钮 */
+  /** 仅投资阶段可发动快捷按钮 */
   canAct?: boolean;
   compact?: boolean;
 }
@@ -77,7 +77,7 @@ export const BuffRoundChips: React.FC<Props> = ({
 
       {hasWorkRest && (
         <span
-          title="本卡生效轮次内被摸鱼传染时不减精力，+8 精力"
+          title="本卡生效轮次内被摸鱼传染时不减精力，+8 精力；发动时追溯改判已发生的摸鱼"
           style={{
             border: `1px solid ${BUFF_CARD_DEFS.buff_work_rest?.color ?? "#10b981"}55`,
             background: "rgba(16,185,129,0.12)",

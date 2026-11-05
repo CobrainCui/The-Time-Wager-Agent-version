@@ -74,6 +74,7 @@ import {
   proposeLotterySettle,
   revokeLotteryGrant,
 } from "../logic/lotterySettle.js";
+import { createRandomLotteryOffer } from "../logic/lotteryDraw.js";
 import {
   claimWealthAdjustResponse,
   proposeWealthAdjust,
@@ -2129,6 +2130,37 @@ export function registerSocketHandlers(io: Server, socket: Socket) {
             message: result.notifyTargetMsg,
           });
         }
+      }
+      // 彩票：打出后立刻线上随机掷骰，Agent/玩家看到骰子结果后确认领取
+      if (cardId === "buff_lottery") {
+        void createRandomLotteryOffer(game, player.id)
+          .then((drawResult) => {
+            if (!drawResult.ok) return;
+            const { offer, draw } = drawResult;
+            socket.emit("lotterySettleRequest", {
+              offerId: offer.offerId,
+              amount: offer.amount,
+              roll: offer.roll ?? null,
+              source: offer.source ?? draw.source,
+              drawnAt: offer.drawnAt ?? draw.drawnAt,
+            });
+            game.logs.push(
+              `🎲 线上随机开奖：${player.name} 掷出 ${draw.roll} 点，奖金 ${offer.amount} 财富`
+            );
+            appendSessionEvent(game, "lottery_drawn", {
+              targetPlayerId: player.id,
+              amount: offer.amount,
+              roll: offer.roll ?? null,
+              source: offer.source ?? draw.source,
+              actor: "player",
+            });
+            broadcastUpdate(io, game);
+            tryAdvancePhase(game);
+          })
+          .catch((error) => {
+            console.error("[lottery] random draw failed:", error);
+            tryAdvancePhase(game);
+          });
       }
     } else {
       socket.emit("error", result.msg);

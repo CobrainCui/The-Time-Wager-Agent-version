@@ -195,6 +195,12 @@ export interface LotteryOffer {
   offerId: string;
   playerId: string;
   amount: number;
+  /** 线上随机骰子点数 1–6；主持手动开奖或旧档可能缺省 */
+  roll?: number;
+  /** 随机源：random.org / 服务端加密随机 / 主持手动 */
+  source?: "random.org" | "server" | "manual";
+  /** 抽奖完成时间，用于超时自动领取 */
+  drawnAt?: number;
 }
 
 /** 主持发起的财富调整，待玩家确认后才入账 */
@@ -210,10 +216,14 @@ export interface LotteryCompletedDeal {
   playerId: string;
   /** 实际入账财富（可能已点石成金） */
   amount: number;
-  /** 主持填入的原额；旧档可能缺省 */
+  /** 主持填入 / 随机抽出的原额；旧档可能缺省 */
   enteredAmount?: number;
   /** 入账时是否套用了点石成金 */
   goldApplied?: boolean;
+  /** 线上随机骰子点数 1–6 */
+  roll?: number;
+  /** 随机源：random.org / 服务端加密随机 / 主持手动 */
+  source?: "random.org" | "server" | "manual";
 }
 
 export interface BuffRoundNote {
@@ -241,6 +251,12 @@ export interface RoundBuffPlayRecord {
   energyDeltas: { playerId: string; delta: number }[];
   wealthCredited?: number;
   voided: boolean;
+  /** 本张【摸鱼传染】已被哪张【劳逸结合】改判；打火机作废时据此回滚改判 */
+  convertedByPlayId?: string;
+  /** 本张摸鱼打出时目标已带有哪张【劳逸结合】被动（含实例 id） */
+  passiveWorkRestInstanceId?: string;
+  /** 本张【劳逸结合】追溯改判了哪些摸鱼（按 playId） */
+  convertedSlackPlayIds?: string[];
 }
 
 /** 投资阶段打火机声明，结算时统一判定 */
@@ -311,6 +327,8 @@ export interface SlackHitNotice {
   energyAfter: number;
   /** 摸鱼后精力为负且已自动解锁锁定投资 */
   investmentAutoUnlocked?: boolean;
+  /** 对应的本轮摸鱼流水；打火机作废该次摸鱼时按此精确移除提示 */
+  sourcePlayId?: string;
 }
 
 export interface Player {

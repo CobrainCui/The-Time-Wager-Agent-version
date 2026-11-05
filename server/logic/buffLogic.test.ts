@@ -518,7 +518,7 @@ describe("buffLogic new roster effects", () => {
     );
   });
 
-  it("force buy works once per auction session", () => {
+  it("force buy can use a second copy granted by admin", () => {
     const game = createInitialGame("r", []);
     game.phase = "AUCTION";
     game.currentEra = 3;
@@ -535,8 +535,8 @@ describe("buffLogic new roster effects", () => {
     p.inventory.push(FORCE_BUY_CARD_ID);
     game.auctionFocusCardId = "buff_work_rest";
     const second = useForceBuyCard(game, "p");
-    assert.equal(second.success, false);
-    if (!second.success) assert.match(second.msg, /只能用一次/);
+    assert.equal(second.success, true);
+    assert.ok(p.inventory.includes("buff_work_rest"));
   });
 
   it("lighter defers inventory burn until settlement ack", () => {
@@ -817,5 +817,118 @@ describe("buffLogic new roster effects", () => {
     assert.equal(res.success, true);
     assert.equal(game.auctionBids?.[0]?.status, "void_force_buy");
     assert.equal(game.auctionFocusCardId, "buff_force_buy");
+  });
+
+  it("force buy uses each physical copy once when admin granted extras", () => {
+    const game = createInitialGame("r", []);
+    game.phase = "AUCTION";
+    game.currentEra = 2;
+    beginAuctionSession(game);
+    game.auctionFocusCardId = "buff_gold";
+    const p = player("p", { inventory: [FORCE_BUY_CARD_ID, FORCE_BUY_CARD_ID] });
+    game.players = [p, player("other")];
+    assert.equal(useForceBuyCard(game, "p").success, true);
+    assert.equal(p.inventory.filter((c) => c === FORCE_BUY_CARD_ID).length, 1);
+    assert.equal(useForceBuyCard(game, "p").success, true);
+    assert.equal(p.inventory.filter((c) => c === FORCE_BUY_CARD_ID).length, 0);
+  });
+
+  it("lighter burning a converted slack also removes that work-rest conversion", () => {
+    const game = createInitialGame("r", []);
+    game.phase = "BUFF_USAGE";
+    const a = player("a", { inventory: ["buff_slack", "buff_slack", LIGHTER_CARD_ID] });
+    const c = player("c", { inventory: [WORK_REST_CARD_ID] });
+    const b = player("b", { energy: 20 });
+    game.players = [a, b, c];
+
+    useBuffCard(game, "a", "buff_slack", { targetPlayerId: "b" });
+    useBuffCard(game, "a", "buff_slack", { targetPlayerId: "b" });
+    assert.equal(b.energy, 4);
+    useBuffCard(game, "c", WORK_REST_CARD_ID, { targetPlayerId: "b" });
+    assert.equal(b.energy, 36); // 两次摸鱼各改判为 +8
+
+    useBuffCard(game, "a", LIGHTER_CARD_ID, {
+      targetPlayerId: "b",
+      burnCardId: "buff_slack",
+    });
+    resolveRoundBuffsAtSettlement(game);
+
+    // 仍有一次摸鱼被劳逸结合改判：20 + 8 = 28，而不是 44
+    assert.equal(b.energy, 28);
+    const workRestPlay = game.roundBuffPlays?.find((p) => p.cardId === WORK_REST_CARD_ID);
+    assert.equal(workRestPlay?.energyDeltas[0]?.delta, 16);
+    const remainingSlack = game.roundBuffPlays?.filter(
+      (p) => p.cardId === "buff_slack" && !p.voided
+    );
+    assert.equal(remainingSlack?.length, 1);
+    assert.ok(remainingSlack?.[0]?.convertedByPlayId);
+    assert.equal(b.pendingSlackHits?.length, 0);
+  });
+
+  it("lighter burning work-rest restores the slack and leaves it convertible again", () => {
+    const game = createInitialGame("r", []);
+    game.phase = "BUFF_USAGE";
+    const a = player("a", { inventory: ["buff_slack", LIGHTER_CARD_ID] });
+    const c = player("c", { inventory: [WORK_REST_CARD_ID, WORK_REST_CARD_ID] });
+    const b = player("b", { energy: 20 });
+    game.players = [a, b, c];
+
+    useBuffCard(game, "a", "buff_slack", { targetPlayerId: "b" });
+    assert.equal(b.energy, 12);
+    useBuffCard(game, "c", WORK_REST_CARD_ID, { targetPlayerId: "b" });
+    assert.equal(b.energy, 28);
+    useBuffCard(game, "a", LIGHTER_CARD_ID, {
+      targetPlayerId: "b",
+      burnCardId: WORK_REST_CARD_ID,
+    });
+    resolveRoundBuffsAtSettlement(game);
+    assert.equal(b.energy, 12);
+
+    const slackPlay = game.roundBuffPlays?.find((p) => p.cardId === "buff_slack");
+    assert.equal(slackPlay?.convertedByPlayId, undefined);
+    // 作废后仍可再被一张新的劳逸结合改判
+    useBuffCard(game, "c", WORK_REST_CARD_ID, { targetPlayerId: "b" });
+    assert.equal(b.energy, 28);
+  });
+
+  it("lighter burning work-rest also reverts slacks cast while the passive was active", () => {
+    const game = createInitialGame("r", []);
+    game.phase = "BUFF_USAGE";
+    const a = player("a", { inventory: ["buff_slack", LIGHTER_CARD_ID] });
+    const c = player("c", { inventory: [WORK_REST_CARD_ID] });
+    const b = player("b", { energy: 20 });
+    game.players = [a, b, c];
+
+    useBuffCard(game, "c", WORK_REST_CARD_ID, { targetPlayerId: "b" });
+    useBuffCard(game, "a", "buff_slack", { targetPlayerId: "b" });
+    assert.equal(b.energy, 28); // 劳逸被动生效，摸鱼改为 +8
+
+    useBuffCard(game, "a", LIGHTER_CARD_ID, {
+      targetPlayerId: "b",
+      burnCardId: WORK_REST_CARD_ID,
+    });
+    resolveRoundBuffsAtSettlement(game);
+
+    // 劳逸被作废后，这次摸鱼应恢复为 -8：20 - 8 = 12
+    assert.equal(b.energy, 12);
+    const slackPlay = game.roundBuffPlays?.find((p) => p.cardId === "buff_slack");
+    assert.equal(slackPlay?.energyDeltas[0]?.delta, -8);
+    assert.equal(slackPlay?.passiveWorkRestInstanceId, undefined);
+  });
+
+  it("lighter burns only one copy of the declared kind", () => {
+    const game = createInitialGame("r", []);
+    game.phase = "BUFF_USAGE";
+    const a = player("a", { inventory: [LIGHTER_CARD_ID] });
+    const b = player("b", { inventory: ["buff_insurance", "buff_insurance"] });
+    game.players = [a, b];
+    useBuffCard(game, "a", LIGHTER_CARD_ID, {
+      targetPlayerId: "b",
+      burnCardId: "buff_insurance",
+    });
+    resolveRoundBuffsAtSettlement(game);
+    assert.equal(b.pendingLighterBurnNotices?.length, 1);
+    assert.equal(ackLighterBurnNotice(game, "b", b.pendingLighterBurnNotices?.[0]?.id), true);
+    assert.equal(b.inventory.filter((c) => c === "buff_insurance").length, 1);
   });
 });

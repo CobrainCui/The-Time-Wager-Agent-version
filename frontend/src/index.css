@@ -1485,7 +1485,7 @@ h1, h2, h3, h4, h5, h6 {
   scroll-padding-bottom: var(--dock-clearance, calc(8rem + env(safe-area-inset-bottom, 0px)));
 }
 
-/* 道具阶段固定「进入讨论和投资」底栏 */
+/* 投资阶段固定「进入讨论和投资」底栏 */
 .buff-usage-page {
   padding-bottom: var(--dock-clearance, calc(8rem + env(safe-area-inset-bottom, 0px)));
   scroll-padding-bottom: var(--dock-clearance, calc(8rem + env(safe-area-inset-bottom, 0px)));

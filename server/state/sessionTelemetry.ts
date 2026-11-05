@@ -27,6 +27,7 @@ export type SessionEventType =
   | "auction_lot_passed"
   | "auction_lot_changed"
   | "lottery_offered"
+  | "lottery_drawn"
   | "lottery_settled"
   | "lottery_offer_cancelled"
   | "lottery_revoked"

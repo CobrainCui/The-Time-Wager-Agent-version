@@ -83,10 +83,10 @@ export const TUTORIAL_SLIDES: TutorialSlide[] = [
         demoKey: "tiedRank",
     },
     {
-        title: "转账与私信",
+        title: "转账、私信与群聊",
         icon: "💬",
         content: [...TUTORIAL_TRANSFER_BULLETS],
-        hostNotes: "演示右侧折叠对话框；可试玩「插入待收转账」；私信可不填金额、只写留言。",
+        hostNotes: "演示右侧折叠对话框；可试玩「插入待收转账」；私信可不填金额、只写留言；群聊演示「全场」与自建群。",
         demoKey: "transferAndMessage",
     },
     {

@@ -44,12 +44,15 @@ describe("lottery settle propose/confirm/revoke", () => {
     game.players = [p];
     const first = proposeLotterySettle(game, "p1", 30);
     assert.equal(first.ok, true);
-    const second = proposeLotterySettle(game, "p1", -10);
+    // 彩票只发奖不扣款，负数应拒绝
+    const negative = proposeLotterySettle(game, "p1", -10);
+    assert.equal(negative.ok, false);
+    const second = proposeLotterySettle(game, "p1", 40);
     assert.equal(second.ok, true);
     if (!second.ok) throw new Error("expected propose");
     assert.equal(second.replaced?.amount, 30);
     assert.equal(game.pendingLotteryOffers?.length, 1);
-    assert.equal(game.pendingLotteryOffers?.[0]?.amount, -10);
+    assert.equal(game.pendingLotteryOffers?.[0]?.amount, 40);
   });
 
   it("credits wealth and removes lottery buff on accept", () => {

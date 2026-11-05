@@ -6,6 +6,7 @@ import {
   resetAllReady 
 } from "./gameActions.js";
 import { settlePhase } from "../logic/projectSettlement.js";
+import { settleAllPendingLotteryOffers } from "../logic/lotteryDraw.js";
 import { clearAdminProjectAdjustState } from "../logic/adminProjectAdjust.js";
 import { ensureProjectsDrawnForEra, stripExpiredRiskProjects, updateEraCard } from "../state/gameEra.js";
 import { beginAuctionSession } from "../logic/auctionCards.js";
@@ -57,6 +58,11 @@ export function tryAdvancePhase(game: GameState) {
   // 3. INVESTMENT -> SETTLEMENT
   else if (game.phase === "INVESTMENT") {
     if (isInvestmentComplete(game)) {
+      // 彩票结果是服务端权威随机值：结算前统一领取，避免 Agent 来不及确认而丢奖
+      const lotterySettled = settleAllPendingLotteryOffers(game);
+      if (lotterySettled > 0) {
+        game.logs.push(`🎲 结算前自动领取 ${lotterySettled} 张彩票开奖`);
+      }
       settlePhase(game);
       clearActionDeadline(game);
       

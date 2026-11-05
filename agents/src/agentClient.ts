@@ -887,9 +887,16 @@ export class AgentClient {
     this.log.info(`拍卖 ${cardId} 决策：${JSON.stringify(result.plan)}（上限 ${maxBid}）`);
     this.emitDecision("auction", result.plan.reasoning ?? "", { cardId, ...result.plan }, result.usage, result.latencyMs);
 
+    // 模型返回时焦点可能已经切到下一张卡；不要把对 A 的决策执行到 B 上
+    if (this.game?.auctionFocusCardId !== cardId) {
+      this.log.warn(`拍卖焦点已从 ${cardId} 切走，放弃本次 ${result.plan.action}`);
+      return false;
+    }
+
     if (result.plan.action === "force_buy") {
       if (obs.me.inventory.includes("buff_force_buy")) {
         await this.politeDelay(0.5);
+        if (this.game?.auctionFocusCardId !== cardId) return false;
         this.emit("useBuffCard", { cardId: "buff_force_buy" });
         this.memory.record("action", `拍卖 ${cardId}：使用强买强卖`, {
           globalRound: obs.globalRound,
@@ -912,6 +919,10 @@ export class AgentClient {
         minNext;
       if (amount >= latestMin && amount <= maxBid) {
         await this.politeDelay(0.6);
+        if (this.game?.auctionFocusCardId !== cardId) {
+          this.log.warn(`出价前拍卖焦点已从 ${cardId} 切走，放弃本次出价`);
+          return false;
+        }
         this.emit("playerPlaceAuctionBid", { amount });
         this.log.info(`出价 ${amount}`);
         this.memory.record("action", `拍卖 ${cardId}：出价 ${amount}`, {

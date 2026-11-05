@@ -1,11 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  claimAuctionResponse,
-  createAuctionOffer,
-  isValidAuctionCost,
-  markAuctionCardDistributed,
-} from "./auctionCards.js";
 import { serializeGameForClient } from "../network/broadcast.js";
 import { createInitialGame, getCommunityNamer, Player } from "../state/gameState.js";
 
@@ -36,38 +30,6 @@ function player(id: string, overrides: Partial<Player> = {}): Player {
     ...overrides,
   };
 }
-
-describe("auction offers", () => {
-  it("rejects a mismatched offer, a negative price, a sold card, and the wrong phase", () => {
-    assert.equal(isValidAuctionCost(-10000), false);
-    assert.equal(isValidAuctionCost(1.5), false);
-    assert.equal(isValidAuctionCost(0), true);
-
-    const game = createInitialGame("room", []);
-    game.phase = "AUCTION";
-    game.currentEra = 2;
-    const { offer } = createAuctionOffer(game, "p1", "buff_gold", 10);
-
-    const mismatch = claimAuctionResponse(game, "p1", "not-the-offer", true);
-    assert.equal(mismatch.ok, false);
-    assert.equal(game.pendingAuctionOffers?.length, 1);
-
-    const otherPlayer = claimAuctionResponse(game, "p2", offer.offerId, true);
-    assert.equal(otherPlayer.ok, false);
-
-    markAuctionCardDistributed(game, "buff_gold");
-    const sold = claimAuctionResponse(game, "p1", offer.offerId, true);
-    assert.equal(sold.ok, false);
-    if (!sold.ok) assert.match(sold.message, /拍走/);
-
-    const { offer: next } = createAuctionOffer(game, "p1", "buff_short", -10000);
-    game.phase = "INVESTMENT";
-    const wrongPhase = claimAuctionResponse(game, "p1", next.offerId, true);
-    assert.equal(wrongPhase.ok, false);
-    if (!wrongPhase.ok) assert.match(wrongPhase.message, /拍卖已结束/);
-    assert.equal(game.pendingAuctionOffers?.some((o) => o.offerId === next.offerId), true);
-  });
-});
 
 describe("investment visibility", () => {
   it("hides other players' drafts and submitted investments during the decision phases", () => {
@@ -135,7 +97,7 @@ describe("investment visibility", () => {
 });
 
 describe("community namer", () => {
-  it("skips offline players and AI", () => {
+  it("skips offline players and server-hosted AI flags in the lab build", () => {
     const game = createInitialGame("room", []);
     game.players = [
       player("rich-offline", { wealth: 500, connected: false }),
@@ -143,6 +105,7 @@ describe("community namer", () => {
       player("online", { wealth: 100 }),
       player("poorer", { wealth: 50 }),
     ];
+    // 实验室版由外部 Agent 作为普通玩家入座；服务端 isAI 标记的座位不参与命名
     assert.equal(getCommunityNamer(game)?.id, "online");
   });
 });

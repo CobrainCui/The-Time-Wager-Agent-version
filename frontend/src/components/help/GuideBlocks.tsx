@@ -90,7 +90,7 @@ export const GuideFlowBlock: React.FC<{ lineFont?: string; overview: string }> =
 
 export const GuideChatBlock: React.FC<{ lineFont?: string }> = ({ lineFont = lineFontDefault }) => (
   <GuideMiniTable
-    caption="转账与私信"
+    caption="私信、转账与群聊"
     lineFont={lineFont}
     minWidth="22rem"
     columns={[

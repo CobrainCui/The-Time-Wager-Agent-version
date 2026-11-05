@@ -25,13 +25,10 @@ export interface HelpLineDef {
 }
 
 /** 玩家聊天说明（教程、侧栏指南、试玩 Demo 共用） */
-export const HELP_TAB_CHAT_TITLE = "转账与私信";
-
-/** 群聊上线时改回「私信、转账与群聊」并恢复 HELP_MISC / 教程中的群相关条目 */
-export const HELP_TAB_CHAT_TITLE_WITH_GROUPS = "私信、转账与群聊";
+export const HELP_TAB_CHAT_TITLE = "私信、转账与群聊";
 
 export const HELP_CHAT_DOCK_INTRO =
-  "等待房、时代介绍与规则教程阶段不显示聊天坞。对局开始后，屏幕右侧为聊天坞：最前为「建群」（无群时）或「+群」（已有群），其后每位玩家各有一个一对一折叠会话。";
+  "等待房、时代介绍与规则教程阶段不显示聊天坞。对局开始后，屏幕右侧为聊天坞：最前为「全场」频道与已加入的自建群，其后每位玩家各有一个一对一折叠会话。";
 
 export const HELP_DM_LINE = "私信：不填金额留言";
 
@@ -39,17 +36,17 @@ export const HELP_TRANSFER_LINE =
   "转账：填金额发送，对方收/退；金额不得超过可用财富（总额减去领先出价占用与未完成转出）";
 
 export const HELP_GROUP_LINE =
-  "群聊：开局无群，点「建群」至少再选 2 名其他玩家（共至少 3 名真人）；群内只可文字、不可转账，仅限群成员可见，无默认全场频道。";
+  "群聊：进房后自动加入「全场」频道，所有真人可见；可自建小群（至少 3 名真人），群内只可文字、不可转账，仅限群成员可见。";
 
 export const HELP_CHAT_PEER_ONLY_NOTE =
-  "私信与转账不会发给多名玩家；群聊文字仅该群成员可见。";
+  "私信与转账只发给单个玩家；群聊文字仅该群成员可见。";
 
 export const HELP_CHAT_AUCTION_LINE =
-  "拍卖期间仍可私信与转账；暂时领先的出价会占用可用财富";
+  "拍卖期间仍可私信、转账与群聊；暂时领先的出价会占用可用财富";
 
 /** 准备清单等场景的群聊一句摘要 */
 export const HELP_GROUP_LINE_SHORT =
-  "开局无群；建群至少 3 名真人，群内仅文字、不可转账";
+  "进房自动加入「全场」；可自建至少 3 名真人的小群，群内仅文字、不可转账";
 
 /** 分栏顺序（与产品一致） */
 export const HELP_TABS: HelpTabDef[] = [
@@ -136,29 +133,24 @@ export const HELP_BUFF_LOCKOUT =
   "倒计时最后 2 分钟不能使用道具卡（投资仍可改、可锁定）";
 
 export const HELP_BUFF_TIMING_SHORT =
-  "第二时代起：讨论与投资阶段、提交锁定前可发动";
-
-export const HELP_BUFF_ROUND_GLOSSARY =
-  "「使用本卡的轮次」指打出该道具卡的对局轮次；与结算页、投资阶段配合理解。侧栏要点中的「本卡生效轮次」与之同义（勿与咖啡等「本轮」混用）。";
+  "获得道具卡后，在投资阶段、提交锁定前可发动";
 
 export const HELP_BUFF_SETTLEMENT_BULLETS = [
-  "项目做空：道具/投资阶段声明，**结算页判定**（进入结算时与其他道具一并执行）",
-  "做空：**全员**在该项目**已积累精力全部清零**（含长期进度与本卡生效轮次内本轮投入，**含使用者自己**）；**已入账财富不追回**",
+  "项目做空：投资阶段（提交锁定前）声明，**结算页判定**（进入结算时与其他道具一并执行）",
+  "做空：**全员**在该项目**已积累精力全部清零**（含长期进度与本卡生效轮次内已投入的精力，**含使用者自己**）；**已入账财富不追回**",
   "打火机：",
   ...LIGHTER_CARD_BULLETS,
 ];
 
-export const HELP_BUFF_SETTLEMENT_RESOLVE = HELP_BUFF_SETTLEMENT_BULLETS.join("；");
 
 export const HELP_BUFF_USE_TIMING_BULLETS = [HELP_BUFF_TIMING_SHORT, HELP_BUFF_LOCKOUT];
 
-export const HELP_BUFF_USE_TIMING = HELP_BUFF_USE_TIMING_BULLETS.join("；");
 
 /** 侧栏「道具」面板顶部规则（分组展示） */
 export const HELP_BUFF_GUIDE_SECTIONS: { title: string; bullets: string[] }[] = [
   {
     title: "发动时机",
-    bullets: [HELP_BUFF_ONCE_RULE, HELP_BUFF_TIMING_SHORT, HELP_BUFF_LOCKOUT, HELP_BUFF_ROUND_GLOSSARY],
+    bullets: [HELP_BUFF_ONCE_RULE, HELP_BUFF_TIMING_SHORT, HELP_BUFF_LOCKOUT],
   },
   {
     title: "打火机与项目做空",
@@ -166,16 +158,6 @@ export const HELP_BUFF_GUIDE_SECTIONS: { title: string; bullets: string[] }[] = 
   },
 ];
 
-export const HELP_BUFF_GUIDE_BULLETS = HELP_BUFF_GUIDE_SECTIONS.flatMap((s) => s.bullets);
-
-/** 流程「发动道具卡」阶段要点（不重复展开打火机全文） */
-export const GUIDE_BUFF_PHASE_BULLETS = [
-  "不限时",
-  HELP_BUFF_ONCE_RULE,
-  "预览可投资项目",
-  ...HELP_BUFF_USE_TIMING_BULLETS,
-  "打火机与做空：道具/投资阶段声明，**结算页执行**（见本页各卡要点或完整说明）",
-];
 
 /** 拍卖会末尾：投资锁定与聊天（教程拍卖会幻灯与侧栏流程共用） */
 export const GUIDE_AUCTION_TAIL_BULLETS = [
@@ -197,20 +179,31 @@ export const BUFF_SIDEBAR_BRIEF: Record<string, string[]> = {
     "**赔付 100** 财富",
     "点石成金对赔付 **×1.5 向下取整**",
   ],
-  buff_gold: ["**正向收益 ×1.5 向下取整**", "含基础、排名、时代、彩票、保险赔付", "**惩罚不放大**"],
-  buff_force_buy: ["**仅拍卖阶段**", "**免费**拿下当前正在拍的卡", "**每张只能用一次**"],
+  buff_gold: [
+    "**正向收益 ×1.5 向下取整**",
+    "含基础、排名、时代、彩票、保险赔付",
+    "**四时代未完长期梯度、退款、转账不放大**",
+    "**惩罚不放大**",
+  ],
+  buff_force_buy: [
+    "**仅拍卖阶段**",
+    "**默认整局仅一张**（管理端补发除外）",
+    "**免费**拿下当前正在拍的卡",
+    "**每张只能用一次**",
+  ],
   buff_short: [
-    "道具/投资阶段声明，**结算页判定**",
-    "**全员**在该项目**已积累精力全部清零**（含长期进度与本卡生效轮次内本轮投入，**含使用者自己**）",
+    "投资阶段（提交锁定前）声明，**结算页判定**",
+    "**全员**在该项目**已积累精力全部清零**（含长期进度与本卡生效轮次内已投入的精力，**含使用者自己**）",
     "**已入账财富不追回**",
   ],
   buff_work_rest: [
     "指定一名在局玩家",
     "本卡生效轮次内被摸鱼时**不减精力而 +8**",
-    "与每场拍卖出现的摸鱼传染配合",
+    "发动时**追溯改判本卡生效轮次内已发生的摸鱼**",
+    "打火机作废摸鱼时，对应改判同步撤销",
   ],
   buff_lighter: [...LIGHTER_CARD_BULLETS],
-  buff_lottery: ["实体骰子定奖金，主持输入", "点石成金对奖金 **×1.5 向下取整**"],
+  buff_lottery: ["系统线上随机掷 1–6 点定奖金", "点数 1/2/3/4/5/6 → 0/30/60/90/120/200", "点石成金对奖金 **×1.5 向下取整**"],
 };
 
 export interface GuideResourceRow {
@@ -251,21 +244,23 @@ export const TUTORIAL_TRANSFER_WEALTH_LIMIT_LINE =
   "金额不得超过可用财富：总额减去领先出价占用，以及对方尚未处理的转出。";
 
 export const GUIDE_CHAT_ROWS: GuideChatRow[] = [
+  { feature: "全场", how: "进房自动加入", note: "所有真人可见；禁聊阶段自动屏蔽" },
+  { feature: "自建群", how: "至少 3 名真人", note: "仅群成员可见；群内只可文字、不可转账" },
   { feature: "转账", how: "右侧对话框填金额发送", note: "仅对方可见，可接收或退回" },
   { feature: "私信", how: "不填金额（或 0）并留言", note: "不扣财富，仅对方可见" },
-  { feature: "用途", how: "结盟、议价、传递情报等", note: "不会发给多名玩家" },
   {
     feature: "财富上限",
     how: "—",
     note: "可用财富 = 总额 − 领先出价占用 − 对方未处理的转出",
   },
-  { feature: "拍卖中", how: "仍可转账与私信", note: "暂时领先的出价占用可用财富" },
+  { feature: "拍卖中", how: "仍可转账、私信与群聊", note: "暂时领先的出价占用可用财富" },
 ];
 
 export const TUTORIAL_TRANSFER_BULLETS = [
   "🤝 转账：右侧每人一个对话框。填金额发送，仅对方可见，可接收或退回。",
   "💬 私信：不填金额（或填 0）并留言，即为仅对方可见的私信（不扣财富）。",
-  "可用于结盟、议价、传递情报等；不会发给多名玩家。",
+  "👥 群聊：进房自动加入「全场」；也可自建至少 3 名真人的小群，群内只可文字、不可转账。",
+  "可用于结盟、议价、传递情报等；私信与转账只发给单个玩家。",
   TUTORIAL_TRANSFER_WEALTH_LIMIT_LINE,
 ];
 
@@ -285,19 +280,18 @@ export const GUIDE_FLOW_PHASES: GuideFlowPhase[] = [
     gavelIcon: true,
   },
   {
-    id: "buffs",
-    title: "发动道具卡（第二时代起）",
-    bullets: GUIDE_BUFF_PHASE_BULLETS,
-  },
-  {
     id: "invest",
-    title: "讨论与投资",
+    title: "讨论、投资与道具",
     showInvestTimer: true,
     bullets: [
       "全员进入后开始倒计时（见下表）",
       "时限内分配精力并提交锁定",
       "锁定后可自行解锁并修改",
       "倒计时结束后不可再解锁",
+      HELP_BUFF_ONCE_RULE,
+      HELP_BUFF_TIMING_SHORT,
+      HELP_BUFF_LOCKOUT,
+      "打火机与做空：投资阶段声明，结算页执行",
       HELP_INVESTMENT_ADVANCE_WHEN_ALL_LOCKED,
       `来杯咖啡：${COFFEE_WEALTH_COST} 财富换 ${COFFEE_ENERGY_GAIN} 精力（未提交可退订）`,
     ],
@@ -338,9 +332,23 @@ export const TUTORIAL_AUCTION_BULLETS = [
   ...GUIDE_AUCTION_TAIL_BULLETS,
 ];
 
-export const HELP_FLOW_OVERVIEW = "时代介绍 → 发动道具卡 → 讨论与投资 → 结算 → 拍卖道具卡";
+export const HELP_FLOW_OVERVIEW = "时代介绍 → 讨论、投资与道具 → 结算 → 拍卖道具卡";
 
-const EVERY_AUCTION_BUFF_IDS = new Set(["buff_slack", "buff_work_rest"]);
+const auctionRounds = Object.keys(AUCTION_CARDS_BY_ROUND).length;
+
+const buffAppearanceCount = new Map<string, number>();
+for (const cards of Object.values(AUCTION_CARDS_BY_ROUND)) {
+  for (const c of cards) {
+    buffAppearanceCount.set(c.id, (buffAppearanceCount.get(c.id) ?? 0) + 1);
+  }
+}
+
+/** 三场拍卖都出现的卡；从卡池自动推导，避免手写名单与拍卖池漂移 */
+const EVERY_AUCTION_BUFF_IDS = new Set(
+  [...buffAppearanceCount.entries()]
+    .filter(([, count]) => count === auctionRounds)
+    .map(([id]) => id)
+);
 
 const cardIdToAuctionRound: Record<string, number> = {};
 for (const [round, cards] of Object.entries(AUCTION_CARDS_BY_ROUND)) {

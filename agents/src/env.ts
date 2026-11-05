@@ -14,7 +14,10 @@ const candidates = [
 ];
 
 for (const file of candidates) {
-  if (fs.existsSync(file)) dotenv.config({ path: file });
+  if (fs.existsSync(file)) {
+    dotenv.config({ path: file, quiet: true });
+    break;
+  }
 }
 
 export { repoRoot };

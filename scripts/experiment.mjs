@@ -126,6 +126,14 @@ const args = parseArgs(process.argv.slice(2));
 const envFile = readEnvFile();
 const stamp = timestampForId();
 const runId = `${safeName(args.name || `${args.condition}-${args.seed}`)}-${stamp}`;
+/** 服务端房间号上限 48 字符；长条件名/自定义名称必须在这里截断，且所有端共用同一个 id。 */
+function makeRoomId(id) {
+  const full = `lab-${id}`;
+  if (full.length <= 48) return full;
+  const hash = crypto.createHash("sha1").update(id).digest("hex").slice(0, 8);
+  return `lab-${id.slice(0, 35)}-${hash}`.slice(0, 48);
+}
+const roomId = makeRoomId(runId);
 const runDir = path.join(root, "experiments", runId);
 fs.mkdirSync(runDir, { recursive: true });
 
@@ -155,7 +163,7 @@ const baseEnv = {
   ADMIN_TOKEN: adminToken,
   PORT: String(args.port),
   AGENT_SERVER_URL: `http://127.0.0.1:${args.port}`,
-  AGENT_ROOM_ID: `lab-${runId}`,
+  AGENT_ROOM_ID: roomId,
   GAME_SEED: args.seed,
   EXPERIMENT_RUN_ID: runId,
   EXPERIMENT_CONDITION: args.condition,
@@ -274,6 +282,15 @@ function stopAll() {
   for (const child of children) killTree(child);
 }
 
+// Ctrl+C / 关闭终端时确保子进程被清理，避免下一次实验端口冲突
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    console.error(`\n[experiment] 收到 ${signal}，正在终止子进程…`);
+    stopAll();
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  });
+}
+
 let mockChild = null;
 if (args.mock) {
   mockChild = startProcess("mock-llm", "node", [path.join(root, "scripts", "mock-llm.mjs")], root, baseEnv);
@@ -298,6 +315,14 @@ const exitCode = await new Promise((resolve) => {
   agentsChild.on("exit", (code) => {
     clearTimeout(timer);
     resolve(code ?? 1);
+  });
+  // server 先异常退出时（端口冲突、崩溃）立即失败，不要静默等 3 小时
+  serverChild.on("exit", (code) => {
+    if (stopped) return;
+    clearTimeout(timer);
+    console.error(`[experiment] server 异常退出（code ${code}），终止本次 run`);
+    stopAll();
+    resolve(code || 1);
   });
 });
 
