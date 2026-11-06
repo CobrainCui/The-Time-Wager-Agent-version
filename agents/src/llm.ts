@@ -77,8 +77,60 @@ function stripJsonFence(text: string): string {
   return t;
 }
 
+function escapeControlCharsInStrings(text: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (!inString) {
+      if (ch === '"') inString = true;
+      out += ch;
+      continue;
+    }
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+    } else if (ch === '"') {
+      out += ch;
+      inString = false;
+    } else if (ch === "\n") {
+      out += "\\n";
+    } else if (ch === "\r") {
+      out += "\\r";
+    } else if (ch === "\t") {
+      out += "\\t";
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
 function parseJson(text: string): unknown {
-  return JSON.parse(stripJsonFence(text));
+  const base = stripJsonFence(text);
+  const escaped = escapeControlCharsInStrings(base);
+  const noTrailingCommas = base.replace(/,\s*([}\]])/g, "$1");
+  const candidates = [
+    base,
+    escaped,
+    noTrailingCommas,
+    escapeControlCharsInStrings(noTrailingCommas),
+    base.replace(/[“”]/g, '"').replace(/[‘’]/g, "'"),
+  ];
+  let lastError: unknown;
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 export interface LlmResult {
@@ -145,7 +197,11 @@ async function requestOnce(
         total: response.usage.total_tokens,
       }
     : undefined;
-  if (!raw.trim()) throw new Error("empty response");
+  if (!raw.trim()) {
+    throw new Error(
+      `empty response (finish_reason=${response.choices[0]?.finish_reason ?? "?"})`
+    );
+  }
   return { data: parseJson(raw), raw, usage, latencyMs: Date.now() - startedAt };
 }
 

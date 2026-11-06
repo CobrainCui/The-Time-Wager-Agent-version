@@ -15,6 +15,7 @@
     "start": "node scripts/start.mjs",
     "experiment": "node scripts/experiment.mjs",
     "analyze": "node scripts/analyze.mjs",
+    "social-score": "node scripts/social-score.mjs",
     "check-ai": "node scripts/check-ai.mjs",
     "mock-llm": "node scripts/mock-llm.mjs",
     "agents": "npm --prefix agents run start",

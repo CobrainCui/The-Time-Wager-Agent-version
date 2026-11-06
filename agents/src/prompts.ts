@@ -35,11 +35,37 @@ function sanitizeRulesForAgent(text: string): string {
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/**
+ * 规则文件里混有「真人 / AI / Agent / 实验室」等实验编排说明。
+ * 这些不是玩家在牌桌上本来能知道的信息，注入前统一去掉，
+ * 只保留规则本身；避免 Agent 从规则文本推断其他座位是不是真人、用的什么模型。
+ */
+function scrubOpponentMeta(text: string): string {
+  return text
+    .replace(/^.*AI_BOT_ENABLED.*(?:\r?\n|$)/gm, "")
+    .replace(
+      /实验室固定\s*6\s*名玩家[：:]\s*6\s*个?\s*独立\s*(?:AI\s*|LLM\s*)?Agent/gi,
+      "本局固定 6 名玩家"
+    )
+    .replace(
+      /实验室固定\s*6\s*个?\s*(?:独立\s*)?(?:AI\s*|LLM\s*)?Agent/gi,
+      "本局固定 6 名玩家"
+    )
+    .replace(/\d+\s*个?\s*独立\s*(?:AI\s*|LLM\s*)?Agent/gi, "6 名玩家")
+    .replace(/(?:AI\s*|LLM\s*)?Agent/gi, "玩家")
+    .replace(/AI\s*补位|AI\s*补满|由\s*AI\s*补/gi, "补齐")
+    .replace(/1[–-]6\s*名玩家\s*\+\s*补齐/g, "1–6 名玩家补齐")
+    .replace(/真人/g, "玩家")
+    .replace(/实验室/g, "本局")
+    .replace(/\bAI\b/g, "系统")
+    .replace(/LLM/g, "系统");
+}
+
 export function getRulesKnowledge(): string {
   if (cachedRules != null) return cachedRules;
   const files = ["game_skills.md", "data_projects.md", "data_buff_cards.md", "data_numeric_config.md"];
   const parts = files
-    .map((f) => sanitizeRulesForAgent(readRuleFile(f)))
+    .map((f) => scrubOpponentMeta(sanitizeRulesForAgent(readRuleFile(f))))
     .filter(Boolean)
     .map((text, i) => `### 规则文件 ${i + 1}: ${files[i]}\n${text}`);
   cachedRules = parts.join("\n\n");
@@ -57,9 +83,9 @@ export function buildSystemPrompt(agent: AgentConfig): string {
     "游戏共 4 个时代 × 2 轮 = 8 个全局轮，时代 2、3、4 开始前各有 1 场拍卖。",
     "你的唯一目标：在游戏结束时拥有尽可能高的财富，并争取第一名。",
     "",
-    "本实验不要求你扮演任何角色，也没有给你预设人格、性格或风险偏好。",
+    "本局不要求你扮演任何角色，也没有给你预设人格、性格或风险偏好。",
     "请只依据规则、当前观察、你自己的记忆和其他玩家的行为做决策。",
-    "你可以合作、竞争、谈判、转账、使用道具卡；所有承诺都只是语言，没有强制约束。",
+    "你可以合作、竞争、谈判、转账、拉群、使用道具卡；所有承诺都只是语言，没有强制约束。",
     "",
     "## 行为准则",
     "- 只依据下面给出的规则和当前观察做决策，不编造不存在的项目 ID、玩家 ID 或卡牌 ID。",
@@ -174,6 +200,8 @@ export function buildInvestmentPrompt(
     "",
     "## 本轮可做的事",
     "- 最多发 2 条公开消息（channel=public）和 2 条私聊（channel=private，必须填 toPlayerId）。",
+    "- 可以拉一个自定义群：至少选择 2 名其他玩家；创建后群聊只对成员可见。",
+    "- 可以在自己已加入的群里各发 1 条消息（groupMessages，groupId 必须是 groupChats 里的群）。",
     "- 可以给 1 名玩家转账；可以买咖啡；可以使用 1 张手牌。",
     "- 然后把剩余精力投给项目。投资总和不能超过你的精力（若先买咖啡，最多可再加 coffee 点）。",
     "",
@@ -184,6 +212,10 @@ export function buildInvestmentPrompt(
     { "channel": "public", "text": "对全场说的话" },
     { "channel": "private", "toPlayerId": "玩家ID", "text": "对某个玩家说的话" }
   ],
+  "groupMessages": [
+    { "groupId": "你所在的群 ID", "text": "群内发言" }
+  ],
+  "createGroup": { "name": "可选群名", "memberIds": ["玩家ID", "玩家ID"] },
   "transfer": { "toPlayerId": "玩家ID", "amount": 10, "note": "备注" } | null,
   "coffee": 0,
   "useCard": { "cardId": "buff_xxx", "targetPlayerId": "玩家ID", "targetProjectId": 123, "burnCardId": "buff_xxx" } | null,
@@ -193,6 +225,8 @@ export function buildInvestmentPrompt(
     "",
     "约束：",
     "- messages 可以为空数组；不要编造玩家 ID。",
+    "- createGroup 不需要时输出 null；memberIds 至少 2 名其他玩家，不能填自己。",
+    "- groupMessages 只能发给你在 groupChats 里的群；没有合适内容就输出 []。",
     "- 只能使用你手牌里的卡；卡牌目标必须是当前在局玩家/项目。",
     "- 打火机需要 burnCardId；项目做空需要 targetProjectId；摸鱼传染需要 targetPlayerId。",
     "- 如果本阶段你不想做任何操作，也要输出 {\"messages\":[],\"investment\":{},\"ready\":true} 以推进游戏。",
@@ -222,9 +256,9 @@ export function buildPredictionPrompt(
     renderPublicMessages(obs.publicMessages, 20),
     "",
     "## 输出 JSON",
-    `{"reasoning":"...","ranking":["第1名玩家ID","第2名玩家ID","第3名玩家ID","第4名玩家ID","第5名玩家ID","第6名玩家ID"]}`,
+    `{"reasoning":"一句话，最多 50 字","ranking":["第1名玩家ID","第2名玩家ID","第3名玩家ID","第4名玩家ID","第5名玩家ID","第6名玩家ID"]}`,
     "",
-    `必须恰好包含全部 ${obs.players.length} 名玩家的 ID，且不重复。`,
+    "必须恰好包含全部玩家 ID，且不重复。先给出排名，再用一句话说明，不要长篇推理。",
     "",
     "## 当前观察数据（JSON）",
     compactObservation(obs),
@@ -242,6 +276,7 @@ export function buildAuctionPrompt(
     .slice(-10)
     .map((b) => `${b.playerName}: ${b.amount}`)
     .join(" → ");
+  const minimumBid = Math.max(5, Math.ceil(Number(obs.auction?.minimumNextBid ?? 5)));
 
   return [
     `阶段：拍卖会（第 ${obs.globalRound} 全局轮 / 时代 ${obs.era}）`,
@@ -262,7 +297,7 @@ export function buildAuctionPrompt(
     "你可以：出价（bid，金额必须是整数且 >= 最低下一口且 <= 你的可用上限）、放弃这张（pass），或使用【强买强卖】免费拿走当前焦点卡（force_buy，仅当你手牌里有 buff_force_buy）。",
     "",
     "输出 JSON：",
-    `{"reasoning":"...","action":"bid","amount":15}`,
+    `{"reasoning":"...","action":"bid","amount":${minimumBid}}`,
     `{"reasoning":"...","action":"pass"}`,
     `{"reasoning":"...","action":"force_buy"}`,
   ].join("\n");

@@ -84,9 +84,26 @@ function investment(obs, agentIndex) {
       ? { toPlayerId: others[agentIndex % others.length].id, amount: 5, note: "合作诚意" }
       : null;
 
+  const groupChats = obs?.groupChats ?? [];
+  const createGroup =
+    round === 1 && agentIndex === 1 && others.length >= 2 && groupChats.length === 0
+      ? { name: "合作小组", memberIds: others.slice(0, 2).map((p) => p.id) }
+      : null;
+  const groupMessages =
+    groupChats.length > 0
+      ? [
+          {
+            groupId: groupChats[0].id,
+            text: `群内同步：第 ${round} 轮我准备投 ${projects[0]?.name ?? "当前项目"}。`,
+          },
+        ]
+      : [];
+
   return {
     reasoning: `根据第 ${round} 轮项目容量与精力做分配。`,
     messages,
+    groupMessages,
+    createGroup,
     transfer,
     coffee: 0,
     useCard: null,

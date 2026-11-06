@@ -1,26 +1,26 @@
 [
   {
     "index": 1,
-    "name": "Agent 1"
+    "name": "玩家1"
   },
   {
     "index": 2,
-    "name": "Agent 2"
+    "name": "玩家2"
   },
   {
     "index": 3,
-    "name": "Agent 3"
+    "name": "玩家3"
   },
   {
     "index": 4,
-    "name": "Agent 4"
+    "name": "玩家4"
   },
   {
     "index": 5,
-    "name": "Agent 5"
+    "name": "玩家5"
   },
   {
     "index": 6,
-    "name": "Agent 6"
+    "name": "玩家6"
   }
 ]

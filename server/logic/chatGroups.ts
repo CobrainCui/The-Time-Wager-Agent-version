@@ -84,6 +84,10 @@ export function syncChatGroupsOnRosterChange(game: GameState): void {
   game.chatGroups = (game.chatGroups ?? []).filter((g) => {
     if (g.kind === "public") return true;
     g.memberIds = g.memberIds.filter((id) => humans.has(id));
+    // 群主被移出/离线后，把群主转给仍然留在群里的第一名成员
+    if (g.ownerId && !g.memberIds.includes(g.ownerId)) {
+      g.ownerId = g.memberIds[0];
+    }
     return g.memberIds.length >= 2;
   });
   const groupIds = new Set(game.chatGroups.map((g) => g.id));

@@ -203,16 +203,29 @@ export function serializeGameForClient(
         inventory,
         activeBuffs,
         usedCards,
-        // 实验盲区：非上帝视角不暴露其他 Agent 的序号 / 人格 / 模型 / 供应商
+        // 实验盲区：非上帝视角不暴露玩家的真人/Agent 身份、序号 / 人格 / 模型 / 供应商
+        isAgent,
+        isAI,
         agentPersona,
         agentModel,
         agentProvider,
         agentIndex,
+        aiPersona,
         // 旧局内存可能仍带幽灵字段，避免漏进玩家 payload
         lighterBurnGhostIds: _lighterBurnGhostIds,
         ...rest
       } = p as typeof p & { lighterBurnGhostIds?: string[] };
-      const agentMeta = isGodView ? { agentPersona, agentModel, agentProvider, agentIndex } : {};
+      const agentMeta = isGodView
+        ? {
+            isAgent,
+            isAI,
+            agentPersona,
+            agentModel,
+            agentProvider,
+            agentIndex,
+            aiPersona,
+          }
+        : {};
       const slackAttribution =
         isGodView
           ? { slackedBy: p.slackedBy ?? [], slackEnergyLost: p.slackEnergyLost ?? [] }

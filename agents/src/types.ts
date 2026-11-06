@@ -28,6 +28,14 @@ export interface ChatGroupView {
   memberIds: string[];
 }
 
+/** 玩家视角的自定义群：成员与最近消息。 */
+export interface GroupChatView {
+  id: string;
+  name: string;
+  memberIds: string[];
+  messages: GroupMessageView[];
+}
+
 export interface GroupMessageView {
   id: string;
   groupId: string;
@@ -224,7 +232,6 @@ export interface Observation {
     energy: number | null;
     ready: boolean;
     isMe: boolean;
-    isAgent: boolean;
     inventoryCount: number;
   }>;
   projects: ProjectView[];
@@ -234,6 +241,8 @@ export interface Observation {
   myPendingTransactions: TransactionView[];
   publicMessages: GroupMessageView[];
   privateMessages: DirectMessageView[];
+  /** 自己所在的自定义群；只包含成员可见的群与消息 */
+  groupChats: GroupChatView[];
   publicGroupId: string | null;
   settlementHistory: NonNullable<GameSnapshot["settlementHistory"]>;
   auction: {
@@ -258,6 +267,10 @@ export interface ChatMessagePlan {
 export interface InvestmentPlan {
   reasoning?: string;
   messages?: ChatMessagePlan[];
+  /** 自定义群消息；groupId 必须是 groupChats 里的群 */
+  groupMessages?: Array<{ groupId: string; text: string }>;
+  /** 拉群：至少 2 名其他玩家，创建者自动加入 */
+  createGroup?: { name?: string; memberIds: string[] } | null;
   transfer?: { toPlayerId: string; amount: number; note?: string } | null;
   coffee?: number;
   useCard?: {

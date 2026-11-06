@@ -69,7 +69,7 @@ function readAgentsSeed(): Array<{ index: number; name: string }> {
   }
   return raw.map((a) => ({
     index: a.index,
-    name: String(a.name).trim().slice(0, 24) || `Agent ${a.index}`,
+    name: String(a.name).trim().slice(0, 24) || `玩家${a.index}`,
   }));
 }
 
@@ -167,7 +167,9 @@ export function loadRuntimeConfig(): RuntimeConfig {
       Math.max(0.05, envNumber("AGENT_AUCTION_MAX_WEALTH_RATIO", 0.35))
     ),
     tokenBudget: envNumber("AGENT_TOKEN_BUDGET", 1_000_000),
-    maxOutputTokens: envNumber("AGENT_MAX_OUTPUT_TOKENS", 1_200),
+    // 推理模型（如 deepseek-flash）的思维链也计入 completion_tokens。
+    // 实测单次可到 3 万；32k 上限会把长预测截成空 content，因此默认给到 64k。
+    maxOutputTokens: envNumber("AGENT_MAX_OUTPUT_TOKENS", 64_000),
     maxRetries: Math.max(1, envNumber("AGENT_MAX_RETRIES", 3)),
     joinStaggerMs: Math.max(0, envNumber("AGENT_JOIN_STAGGER_MS", 350)),
     joinTimeoutMs: Math.max(5_000, envNumber("AGENT_JOIN_TIMEOUT_MS", 90_000)),

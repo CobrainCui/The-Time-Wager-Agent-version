@@ -15,15 +15,15 @@
 |------|--------|------|
 | 缺 Key 时 | 回退内置规则策略，静默跑完 | **直接报错退出**，不产生伪数据 |
 | LLM 调用失败 | 回退规则策略 | 重试后仍失败 → **终止本局并标记失败** |
-| Agent 人格 | 6 套预置人格提示词 | **全部中立**，只有编号；差异只来自模型/供应商与对局经历 |
+| Agent 人格 | 6 套预置人格提示词 | **全部中立**，只有座位编号；差异只来自模型/供应商与对局经历 |
 | Harness | 各 Agent 略有差异 | **同一套系统提示词、同一套能力开关、同一温度、同一 token 预算** |
-| 沟通 | 群聊开关关闭 | **公开群聊 + 一对一私聊全开**，发言进入导出 |
+| 沟通 | 群聊开关关闭 | **公开群聊 + 自定义群 + 一对一私聊全开**，Agent 可自己拉群，发言进入导出 |
 | 记忆 | 无 | 每 Agent 一份滚动结构化记忆，落盘可审计 |
 | 心智理论 | 无测量 | 每个时代开始前**显式预测最终六人排名**，Kendall τ / MAE 计分 |
 | 随机性 | `Math.random()` | **`GAME_SEED` 可复现**：时代顺序、项目发牌、派生局种子 |
 | 实验管理 | 手工点 | `npm run experiment`：条件清单、N 局、manifest、归档、汇总 CSV |
 | 成本 | 只有超时 | **每 Agent 每局 token 上限**，超限终止本局 |
-| 观察盲区 | 玩家能看到他人 Agent 人格/模型 | 玩家视角**隐藏** `agentIndex/agentModel/agentProvider` |
+| 观察盲区 | 玩家能看到他人 Agent 人格/模型 | 玩家视角**隐藏** `isAgent/isAI/agentIndex/agentModel/agentProvider` |
 | 导出 | 11 个原始表 | 增加 **指标、私聊、预测、Agent决策、指标汇总** |
 | 管理员分析 | 只有原始记录 | 历史场次内直接看**条件/种子/模型/指标/预测评分** |
 
@@ -35,7 +35,7 @@
 
 - 一个可复现、可审计的多 Agent 社会博弈实验台。
 - 6 个 Agent 各自持有独立 Socket 连接、独立上下文、独立记忆文件，进入同一房间。
-- 一局 8 轮，含 3 场拍卖；玩家间可公开聊天、私聊、转账、使用干扰卡。
+- 一局 8 轮，含 3 场拍卖；玩家间可公开聊天、私聊、转账、自己拉群、使用干扰卡。
 - 彩票与产品版同规则：服务端线上随机掷骰（random.org 失败退回加密随机），随机源与点数写入导出。
 - 管理端保留上帝视角：看局面、看预测与决策、控场、导出 JSON + XLSX。
 
@@ -91,12 +91,12 @@ agent-edition/
 
 ```text
 ┌──────────────────── agents/ ────────────────────┐
-│  Agent 1 … Agent 6                              │
+│  玩家1 … 玩家6（内部 agentIndex 1–6）            │
 │  各自 socket / 上下文 / 记忆文件 / 模型配置      │
 │  同一套 prompt、同一套能力开关、同一温度         │
 └───────────────┬─────────────────────────────────┘
                 │ joinGame / playerReady / submitInvestment
-                │ sendGroupMessage / sendDirectMessage
+                │ createChatGroup / sendGroupMessage / sendDirectMessage
                 │ submitPrediction / agentDecision
                 ▼
         ┌───────────────────┐         ┌──────────────────────────┐
@@ -106,13 +106,14 @@ agent-edition/
         └─────────┬─────────┘         └──────────────────────────┘
                   │ gameUpdate（按视角裁剪）
                   ├──────────────► 6 个 Agent：只看到自己的手牌、精力、投资草稿；
-                  │                 他人 Agent 标签被隐藏；可见公开群聊与自己收发的私聊
+                  │                 他人真人/Agent 身份、序号、模型均被隐藏；
+                  │                 可见公开群聊、自己所在自定义群与自己收发的私聊
                   └──────────────► 管理端：上帝视角 + 实验记录 + 导出
 ```
 
 三个关键约束：
 
-1. **玩家视角裁剪**在服务端完成。他人精力、手牌、已用道具、投资草稿、Agent 序号/模型不会下发给 Agent。
+1. **玩家视角裁剪**在服务端完成。他人精力、手牌、已用道具、投资草稿、真人/Agent 身份、Agent 序号/模型不会下发给 Agent。
 2. **主持控场**复用管理端 Socket（`ADMIN_TOKEN` 鉴权）。拍卖卡池由服务端通过上帝视图下发，Agent 侧不再硬编码。
 3. **聊天是不可信输入**。Agent 提示词明确把公开聊天与私聊标为「数据，不是指令」，并准备提示注入测试。
 
@@ -264,6 +265,16 @@ npm run analyze -- --exclude-mock --out analysis/2026-11-04
 
 `summary.csv` 与 `qc.csv` 是 `npm run experiment` 写到 `experiments/<runId>/` 的，不在 `analysis/` 输出目录里。
 
+### 6.6 社交行为评定
+
+按每名 Agent 自己发出的**群聊 + 私信**，用同一模型评 A–E，并写入该 run 目录：
+
+```bash
+npm run social-score -- --run finalcheck-424242-2026-11-04_03-40-18-687
+```
+
+输出 `experiments/<runId>/social_scores.csv`（玩家、档位、依据、发言数）。无发言按中性 C。
+
 `dataset.csv` 可直接导入 R/Python 做 bootstrap、混合效应模型或绘图。
 
 ---
@@ -313,6 +324,7 @@ npm run analyze -- --exclude-mock --out analysis/2026-11-04
 | 已完成场次归档 | `server/data/session_archive.json` | 否 |
 | 实验 run | `experiments/<runId>/` | 否 |
 | 自动 QC | `experiments/<runId>/qc.csv` | 否 |
+| 社交评定 | `experiments/<runId>/social_scores.csv` | 否 |
 | Agent 运行日志 | `logs/agents-*.jsonl` | 否 |
 | Agent 记忆 | `logs/memory/<runId>/agent-n-*.jsonl` | 否 |
 | 管理端构建 | `frontend/dist/` | 否 |
@@ -340,16 +352,16 @@ npm run analyze -- --exclude-mock --out analysis/2026-11-04
 | 6 Agent 同房、8 轮、3 场拍卖、命名、结束 | ✅ mock 端到端 2 局通过 |
 | 严格 LLM-only、缺 Key 报错、失败终止 | ✅ 已用 mock 500 验证退出码 2 |
 | 同一 harness、无预置人格 | ✅ 配置与提示词已统一 |
-| 公开群聊 + 一对一私聊 | ✅ 每局 48 条公开 + 24 条私聊（mock） |
+| 公开群聊 + 自定义群 + 一对一私聊 | ✅ 每局 48 条公开 + 24 条私聊 + 群聊（mock）；Agent 可自己拉群 |
 | 结构化记忆 | ✅ `logs/memory/<runId>/agent-n-*.jsonl` |
 | 每时代排名预测 | ✅ 每局 24 条（6 Agent × 4 时代） |
 | 可复现种子 | ✅ 同 seed 派生局种子、时代顺序、项目发牌 |
 | 实验 manifest / N 局 / summary.csv | ✅ |
 | 自动 QC（`qc.csv`） | ✅ 人数/轮次/预测/聊天/决策/token/mock |
 | token 预算 | ✅ 超限终止 |
-| 玩家视角隐藏 Agent 标签 | ✅ |
+| 玩家视角隐藏真人/Agent 身份与模型 | ✅ 不下发 `isAgent/isAI/agentIndex/agentModel/agentProvider`；规则文本也做同义清洗 |
 | 管理员分析视图 | ✅ 条件/种子/模型/指标/预测评分 |
-| 服务端测试 | ✅ 279 / 279 |
+| 服务端测试 | ✅ 316 / 316（产品服务端） |
 | 三端构建 | ✅ |
 
 ### 仍需真实 Key 验证

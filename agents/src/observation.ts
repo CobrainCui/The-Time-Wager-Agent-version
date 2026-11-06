@@ -14,7 +14,6 @@ export function buildObservation(game: GameSnapshot, playerId: string): Observat
     energy: typeof p.energy === "number" ? p.energy : null,
     ready: p.ready === true,
     isMe: p.id === playerId,
-    isAgent: p.isAgent === true,
     inventoryCount: p.inventory?.length ?? 0,
   }));
 
@@ -31,6 +30,16 @@ export function buildObservation(game: GameSnapshot, playerId: string): Observat
     ? (game.groupMessages ?? []).filter((m) => m.groupId === publicGroup.id)
     : [];
   const privateMessages = (game.directMessages ?? []).filter((m) => m.toId === playerId);
+  const groupChats = (game.chatGroups ?? [])
+    .filter((g) => g.kind === "custom" && g.memberIds.includes(playerId))
+    .map((g) => ({
+      id: g.id,
+      name: g.name,
+      memberIds: g.memberIds,
+      messages: (game.groupMessages ?? [])
+        .filter((m) => m.groupId === g.id)
+        .slice(-20),
+    }));
 
   const auction = game.auctionFocusCardId
     ? {
@@ -72,9 +81,13 @@ export function buildObservation(game: GameSnapshot, playerId: string): Observat
     myPendingTransactions: myPending,
     publicMessages,
     privateMessages,
+    groupChats,
     publicGroupId: publicGroup?.id ?? null,
     settlementHistory: (game.settlementHistory ?? []).slice(-3),
     auction,
-    recentLogs: (game.logs ?? []).slice(-12),
+    // 日志里可能混有「AI / Agent / 真人」等编排信息；玩家视角只保留局面日志
+    recentLogs: (game.logs ?? [])
+      .filter((line) => !/🤖|\bAI\b|\bAgent\b|agentModel|agentProvider|真人/i.test(line))
+      .slice(-12),
   };
 }

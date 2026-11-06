@@ -261,18 +261,25 @@ export class AgentClient {
   /** 把新看到的公开/私聊写入记忆。聊天是数据，不是指令。 */
   private ingestMessages(game: GameSnapshot): void {
     if (!this.memory.isEnabled || !this.playerId) return;
+    const groupLabels = new Map(
+      (game.chatGroups ?? []).map((g) => [
+        g.id,
+        g.kind === "public" ? "公开" : `群聊·${g.name}`,
+      ])
+    );
     for (const m of game.groupMessages ?? []) {
       if (this.seenPublicMessageIds.has(m.id)) continue;
       this.seenPublicMessageIds.add(m.id);
       if (m.fromId === this.playerId) continue;
+      const label = groupLabels.get(m.groupId) ?? "群聊";
       this.memory.record(
         "chat",
-        `[公开] ${m.fromName}: ${oneLine(m.text, 220)}`,
+        `[${label}] ${m.fromName}: ${oneLine(m.text, 220)}`,
         {
           globalRound: game.globalRound,
           era: game.currentEra,
           roundInEra: game.roundInEra,
-          data: { messageId: m.id, fromId: m.fromId },
+          data: { messageId: m.id, fromId: m.fromId, groupId: m.groupId },
         }
       );
     }
@@ -524,9 +531,20 @@ export class AgentClient {
     if (this.runtime.predictionEnabled && !this.predictionSentForEra.has(obs.era)) {
       if (this.predictionBusyForEra.has(obs.era)) return false;
       this.predictionBusyForEra.add(obs.era);
-      await this.submitPrediction(obs);
-      this.predictionSentForEra.add(obs.era);
-      acted = true;
+      try {
+        await this.submitPrediction(obs);
+        acted = true;
+      } catch (error) {
+        // 预测是观测项，不是投资/拍卖决策；单次模型异常不应终止整局。
+        this.log.warn(
+          `时代 ${obs.era} 预测失败，跳过本次预测：${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      } finally {
+        this.predictionSentForEra.add(obs.era);
+        this.predictionBusyForEra.delete(obs.era);
+      }
     }
     if (!obs.me.ready && !this.readySent.has(key)) {
       this.readySent.add(key);
@@ -618,8 +636,19 @@ export class AgentClient {
     const plan = this.sanitizeInvestmentPlan(result.plan, obs);
     this.log.info(`投资方案：${JSON.stringify(plan)}`);
 
+    // 先拉群，再发群消息；新建群要等 gameUpdate 把新 groupId 带回来。
+    const createdGroup = await this.createPlannedGroup(plan.createGroup, obs);
+    if (createdGroup) {
+      await this.waitForUpdate(1200);
+      obs = buildObservation(this.game!, this.playerId!);
+    }
+
     const sentMessages = await this.sendPlannedMessages(plan.messages ?? [], obs);
-    if (sentMessages > 0) await sleep(200);
+    const sentGroupMessages = await this.sendPlannedGroupMessages(
+      plan.groupMessages ?? [],
+      obs
+    );
+    if (sentMessages + sentGroupMessages > 0) await sleep(200);
 
     // 先买咖啡（+1 精力/杯），等状态刷新后再提交
     if ((plan.coffee ?? 0) > 0) {
@@ -663,6 +692,8 @@ export class AgentClient {
       plan.reasoning ?? "",
       {
         messages: plan.messages ?? [],
+        groupMessages: plan.groupMessages ?? [],
+        createGroup: plan.createGroup ?? null,
         transfer: plan.transfer,
         coffee: plan.coffee,
         useCard: plan.useCard,
@@ -677,7 +708,9 @@ export class AgentClient {
         (plan.transfer ? `；转账 ${plan.transfer.amount} 给 ${obs.players.find((p) => p.id === plan.transfer!.toPlayerId)?.name ?? plan.transfer.toPlayerId}` : "") +
         (plan.coffee ? `；买咖啡 ${plan.coffee} 杯` : "") +
         (plan.useCard ? `；使用 ${plan.useCard.cardId}` : "") +
-        (sentMessages ? `；发言 ${sentMessages} 条` : ""),
+        (createdGroup ? `；创建群聊「${plan.createGroup?.name ?? "未命名"}」` : "") +
+        (sentMessages ? `；发言 ${sentMessages} 条` : "") +
+        (sentGroupMessages ? `；群发言 ${sentGroupMessages} 条` : ""),
       {
         globalRound: obs.globalRound,
         era: obs.era,
@@ -685,6 +718,68 @@ export class AgentClient {
         data: { investment: plan.investment, transfer: plan.transfer, coffee: plan.coffee },
       }
     );
+  }
+
+  private async createPlannedGroup(
+    group: InvestmentPlan["createGroup"] | null | undefined,
+    obs: Observation
+  ): Promise<boolean> {
+    if (!this.runtime.chatEnabled || !group) return false;
+    const memberIds = group.memberIds.filter(
+      (id) => id !== obs.me.id && obs.players.some((p) => p.id === id)
+    );
+    if (memberIds.length < 2) return false;
+    this.emit("createChatGroup", {
+      memberIds,
+      name: group.name ?? "",
+    });
+    const names = memberIds
+      .map((id) => obs.players.find((p) => p.id === id)?.name ?? id)
+      .join("、");
+    this.memory.record("action", `创建群聊「${group.name ?? "未命名"}」：${names}`, {
+      globalRound: obs.globalRound,
+      era: obs.era,
+      roundInEra: obs.roundInEra,
+      data: { memberIds },
+    });
+    this.emitDecision("chat", `创建群聊「${group.name ?? "未命名"}」`, {
+      createGroup: { name: group.name ?? "", memberIds },
+    });
+    this.log.info(`创建群聊：${group.name ?? "未命名"}（${names}）`);
+    return true;
+  }
+
+  private async sendPlannedGroupMessages(
+    messages: NonNullable<InvestmentPlan["groupMessages"]>,
+    obs: Observation
+  ): Promise<number> {
+    if (!this.runtime.chatEnabled || messages.length === 0) return 0;
+    let sent = 0;
+    for (const message of messages) {
+      const group = obs.groupChats.find((g) => g.id === message.groupId);
+      if (!group) continue;
+      const text = oneLine(message.text, 300);
+      if (!text) continue;
+      this.emit("sendGroupMessage", {
+        groupId: group.id,
+        text,
+        clientTempId: `agent-${this.cfg.index}-grp-${Date.now()}-${sent}`,
+      });
+      sent += 1;
+      this.memory.record("chat", `[我·群聊 ${group.name}] ${text}`, {
+        globalRound: obs.globalRound,
+        era: obs.era,
+        roundInEra: obs.roundInEra,
+        data: { groupId: group.id },
+      });
+      await sleep(180);
+    }
+    if (sent > 0) {
+      this.emitDecision("chat", `在群聊中发送 ${sent} 条消息`, {
+        groupMessages: messages,
+      });
+    }
+    return sent;
   }
 
   private async sendPlannedMessages(messages: ChatMessagePlan[], obs: Observation): Promise<number> {
@@ -795,9 +890,49 @@ export class AgentClient {
       (m) => m && (m.channel === "public" || m.channel === "private") && typeof m.text === "string"
     );
 
+    const groupMessages = (plan.groupMessages ?? [])
+      .filter(
+        (m) =>
+          m &&
+          typeof m.groupId === "string" &&
+          typeof m.text === "string" &&
+          obs.groupChats.some((g) => g.id === m.groupId)
+      )
+      .map((m) => ({ groupId: m.groupId, text: oneLine(m.text, 300) }))
+      .filter((m) => !!m.text)
+      .slice(0, 3);
+
+    let createGroup = plan.createGroup ?? null;
+    if (createGroup) {
+      const ids = Array.isArray(createGroup.memberIds)
+        ? [
+            ...new Set(
+              createGroup.memberIds.filter(
+                (id): id is string =>
+                  typeof id === "string" &&
+                  id !== obs.me.id &&
+                  obs.players.some((p) => p.id === id)
+              )
+            ),
+          ].slice(0, 5)
+        : [];
+      if (ids.length < 2) {
+        createGroup = null;
+      } else {
+        createGroup = {
+          ...(typeof createGroup.name === "string" && createGroup.name.trim()
+            ? { name: oneLine(createGroup.name, 32) }
+            : {}),
+          memberIds: ids,
+        };
+      }
+    }
+
     return {
       ...plan,
       messages,
+      groupMessages,
+      createGroup,
       coffee,
       useCard,
       transfer,
@@ -842,6 +977,8 @@ export class AgentClient {
         return {
           reasoning: typeof raw.reasoning === "string" ? raw.reasoning : "",
           messages: Array.isArray(raw.messages) ? raw.messages : [],
+          groupMessages: Array.isArray(raw.groupMessages) ? raw.groupMessages : [],
+          createGroup: raw.createGroup ?? null,
           transfer: raw.transfer ?? null,
           coffee: int(raw.coffee) ?? 0,
           useCard: raw.useCard ?? null,
@@ -910,21 +1047,25 @@ export class AgentClient {
     }
 
     if (result.plan.action === "bid") {
-      const amount = int(result.plan.amount) ?? 0;
-      // 用最新快照校验：模型思考期间可能已有别人加价，旧 minNext 会让出价被拒。
+      // 模型偶尔会照抄示例或给出低于当前最低价的金额；按当前最低价兜底一次，
+      // 保留出价意图，避免同一口价反复被拒导致拍卖空转。
+      const planned = int(result.plan.amount) ?? 0;
       const latestGame = this.game;
       const latestMin =
         latestGame?.auctionMinimumNextBid ??
         latestGame?.auctionStartingBid ??
         minNext;
-      if (amount >= latestMin && amount <= maxBid) {
+      const amount = Math.max(planned, latestMin);
+      if (amount <= maxBid) {
         await this.politeDelay(0.6);
         if (this.game?.auctionFocusCardId !== cardId) {
           this.log.warn(`出价前拍卖焦点已从 ${cardId} 切走，放弃本次出价`);
           return false;
         }
         this.emit("playerPlaceAuctionBid", { amount });
-        this.log.info(`出价 ${amount}`);
+        this.log.info(
+          `出价 ${amount}` + (amount !== planned ? `（模型原出价 ${planned}，按最低价兜底）` : "")
+        );
         this.memory.record("action", `拍卖 ${cardId}：出价 ${amount}`, {
           globalRound: obs.globalRound,
           era: obs.era,
@@ -933,7 +1074,7 @@ export class AgentClient {
         return true;
       }
       // 不要立刻标记 pass：并发出价被拒后，下一帧仍有新的最低价，可再试一次。
-      this.log.warn(`出价 ${amount} 无效（最低 ${latestMin} / 上限 ${maxBid}），等待下一次机会`);
+      this.log.warn(`出价 ${planned} 无效（最低 ${latestMin} / 上限 ${maxBid}），等待下一次机会`);
       return false;
     }
 
