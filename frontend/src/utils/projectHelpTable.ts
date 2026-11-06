@@ -34,7 +34,7 @@ const STATUS_META: Record<
   ProjectHelpStatusId,
   { chip: string; tooltip: string; chipColor?: string }
 > = {
-  exploded: { chip: "💥 爆", tooltip: "已超上限爆掉并离场（短期无时代加成）" },
+  exploded: { chip: "💥 爆", tooltip: "投资超过上限，项目爆掉并离场（短期没有时代加成）" },
   completed: { chip: "🎉 已完成", tooltip: "已正常完成并离场（短期为恰好满额；可含时代加成）" },
   long_exact_complete: {
     chip: "恰好完成",
@@ -43,7 +43,7 @@ const STATUS_META: Record<
   },
   long_over_complete: {
     chip: "超额完成",
-    tooltip: "长期项目超过上限仍正常结算（非投爆罚）",
+    tooltip: "长期项目超过上限仍正常结算（不是短期那种超额投资惩罚）",
     chipColor: LONG_COMPLETE_CHIP_COLOR,
   },
   withdrawn: {
@@ -52,11 +52,11 @@ const STATUS_META: Record<
   },
   abandoned: {
     chip: "🚫 已放弃",
-    tooltip: "已 1:1 结算累计投入，并退出该项目完成时的排名与时代加成",
+    tooltip: "已放弃结算：累计投入的每 1 点精力返还 1 点财富，并退出该项目完成时的排名与时代加成",
   },
   committed_long: {
-    chip: "📌 已参投",
-    tooltip: "参投后每轮须投入≥3⚡，否则放弃：1:1 结算累计投入并退出完成排名",
+    chip: "📌 已参与投资",
+    tooltip: "参与投资后，每轮至少投入 3 点精力；不足则放弃结算：每 1 点精力返还 1 点财富，并退出完成排名",
   },
   investable: { chip: "✅ 可投", tooltip: "当前阶段可对本项目分配精力" },
   next_round: {
@@ -147,7 +147,7 @@ export function longSettlementStatusLabel(
   result: SettlementProjectResult
 ): { text: string; color: string } | null {
   if (result.type !== "long") return null;
-  if (result.endGradient) return { text: "梯度结算", color: "#a78bfa" };
+  if (result.endGradient) return { text: "按进度返还", color: "#a78bfa" };
   if (!result.isCompleted) return null;
   if (result.isExploded) return { text: "超额完成", color: LONG_COMPLETE_CHIP_COLOR };
   return { text: "恰好完成", color: LONG_COMPLETE_CHIP_COLOR };

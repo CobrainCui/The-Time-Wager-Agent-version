@@ -598,7 +598,7 @@ describe("buffLogic new roster effects", () => {
     assert.deepEqual(b.inventory, ["buff_insurance"]);
   });
 
-  it("lighter miss at settlement when target lacks card", () => {
+  it("lighter miss at settlement only tells the target, never the caster", () => {
     const game = createInitialGame("r", []);
     game.phase = "BUFF_USAGE";
     const a = player("a", { inventory: [LIGHTER_CARD_ID] });
@@ -612,7 +612,17 @@ describe("buffLogic new roster effects", () => {
     assert.equal(res.notifyTargetId, undefined);
     const summary = resolveRoundBuffsAtSettlement(game);
     assert.equal(summary.misses, 1);
-    assert.equal((b.pendingLighterBurnNotices ?? []).length, 0);
+    // 使用者没有命中反馈；被指定者收到「未烧中」提示，且手牌不变
+    assert.equal((a.pendingLighterBurnNotices ?? []).length, 0);
+    assert.equal(b.pendingLighterBurnNotices?.length, 1);
+    assert.equal(b.pendingLighterBurnNotices?.[0]?.kind, "miss");
+    assert.deepEqual(b.inventory, ["buff_gold"]);
+    assert.equal(
+      ackLighterBurnNotice(game, "b", b.pendingLighterBurnNotices?.[0]?.id),
+      true
+    );
+    assert.equal(b.pendingLighterBurnNotices?.length, 0);
+    assert.deepEqual(b.inventory, ["buff_gold"]);
   });
 
   it("lighter hit and miss share the same public log line shape", () => {
@@ -930,5 +940,167 @@ describe("buffLogic new roster effects", () => {
     assert.equal(b.pendingLighterBurnNotices?.length, 1);
     assert.equal(ackLighterBurnNotice(game, "b", b.pendingLighterBurnNotices?.[0]?.id), true);
     assert.equal(b.inventory.filter((c) => c === "buff_insurance").length, 1);
+  });
+
+  it("lighter countering a converted slack spends work-rest without refunding it", () => {
+    const game = createInitialGame("r", []);
+    game.phase = "BUFF_USAGE";
+    const a = player("a", { inventory: ["buff_slack"] });
+    const b = player("b", { energy: 20 });
+    const c = player("c", { inventory: [WORK_REST_CARD_ID] });
+    const d = player("d", { inventory: [LIGHTER_CARD_ID] });
+    game.players = [a, b, c, d];
+
+    // A 摸鱼 B → B 用劳逸结合改判 → D 对 A 打出的那张摸鱼用打火机
+    useBuffCard(game, "a", "buff_slack", { targetPlayerId: "b" });
+    assert.equal(b.energy, 12);
+    useBuffCard(game, "c", WORK_REST_CARD_ID, { targetPlayerId: "b" });
+    assert.equal(b.energy, 28);
+    useBuffCard(game, "d", LIGHTER_CARD_ID, {
+      targetPlayerId: "a",
+      burnCardId: "buff_slack",
+    });
+    resolveRoundBuffsAtSettlement(game);
+
+    // 改判撤销后 B 回到 20；劳逸结合已经被消耗，不会退回 C 的手牌
+    assert.equal(b.energy, 20);
+    assert.equal(c.inventory.includes(WORK_REST_CARD_ID), false);
+    // 劳逸结合仍作为本卡生效轮次内的被动保留
+    assert.equal(
+      b.activeBuffs.some((x) => x.cardId === WORK_REST_CARD_ID),
+      true
+    );
+    const workRestPlay = game.roundBuffPlays?.find((p) => p.cardId === WORK_REST_CARD_ID);
+    assert.equal(workRestPlay?.voided, false);
+    assert.equal(workRestPlay?.energyDeltas[0]?.delta, 0);
+    const slackPlay = game.roundBuffPlays?.find((p) => p.cardId === "buff_slack");
+    assert.equal(slackPlay?.voided, true);
+
+    // 只有被指定的 A 收到打火机提示；使用者 D 看不到命中结果
+    assert.equal(a.pendingLighterBurnNotices?.[0]?.kind, "played");
+    assert.equal((d.pendingLighterBurnNotices ?? []).length, 0);
+    // B 会看到自己的精力因改判撤销而调整
+    assert.ok((b.buffRoundNotes ?? []).some((n) => n.text.includes("打火机")));
+  });
+
+  it("player payload hides light-burn internals and other players' project records", () => {
+    const game = createInitialGame("r", []);
+    game.phase = "INVESTMENT";
+    const a = player("a");
+    const b = player("b", {
+      longTerm: { 101: { totalInvested: 5, status: "active" } },
+      coffeePurchasesThisRound: 2,
+      totalEnergyConsumed: 30,
+      investedRiskEnergy: 3,
+    });
+    game.players = [a, b];
+    game.roundBuffPlays = [
+      {
+        playId: "play-1",
+        ownerId: "a",
+        cardId: "buff_slack",
+        targetPlayerId: "b",
+        energyDeltas: [{ playerId: "b", delta: -8 }],
+        voided: false,
+      },
+    ];
+    game.lighterBurnDeclarations = [
+      {
+        id: "decl-1",
+        casterId: "a",
+        casterName: "a",
+        targetPlayerId: "b",
+        burnCardId: "buff_gold",
+      },
+    ];
+    game.playerLogs = { a: ["只有 a 自己能看的日志"] };
+    game.lastSettlement = {
+      round: 1,
+      results: [],
+      lighterResolve: { hits: 1, misses: 0 },
+    };
+    const project = shortProject();
+    project.investorRecords = { a: 7, b: 5 };
+    project.investorRoundSlices = { a: [7], b: [5] };
+    project.earningRecords = { a: 70, b: 50 };
+    game.activeProjects = [project];
+
+    const forA = serializeGameForClient(game, {}, "a") as Record<string, unknown> & {
+      activeProjects: ActiveProject[];
+      players?: Player[];
+      lastSettlement?: { lighterResolve?: unknown };
+    };
+    assert.equal(forA.roundBuffPlays, undefined);
+    assert.equal(forA.lighterBurnDeclarations, undefined);
+    assert.equal(forA.playerLogs, undefined);
+    assert.equal(forA.lastSettlement?.lighterResolve, undefined);
+    assert.deepEqual(forA.activeProjects[0]?.investorRecords, { a: 7 });
+    assert.deepEqual(forA.activeProjects[0]?.investorRoundSlices, { a: [7] });
+    assert.deepEqual(forA.activeProjects[0]?.earningRecords, {});
+    const bView = forA.players?.find((p) => p.id === "b");
+    assert.deepEqual(bView?.longTerm, {});
+    assert.equal(bView?.coffeePurchasesThisRound, undefined);
+    assert.equal(bView?.totalEnergyConsumed, undefined);
+    assert.equal(bView?.investedRiskEnergy, undefined);
+
+    const god = serializeGameForClient(game, { isGodView: true }, null) as Record<string, unknown> & {
+      activeProjects: ActiveProject[];
+      players?: Player[];
+      lastSettlement?: { lighterResolve?: unknown };
+    };
+    assert.ok(Array.isArray(god.roundBuffPlays));
+    assert.ok(Array.isArray(god.lighterBurnDeclarations));
+    assert.equal(god.lastSettlement?.lighterResolve !== undefined, true);
+    assert.deepEqual(god.activeProjects[0]?.investorRecords, { a: 7, b: 5 });
+    const godB = god.players?.find((p) => p.id === "b");
+    assert.equal(godB?.longTerm[101]?.totalInvested, 5);
+    assert.equal(godB?.coffeePurchasesThisRound, 2);
+  });
+
+  it("force buy rejects outside auction, without focus, and cannot buy itself", () => {
+    const game = createInitialGame("r", []);
+    const p = player("p", {
+      inventory: [FORCE_BUY_CARD_ID, FORCE_BUY_CARD_ID, FORCE_BUY_CARD_ID],
+    });
+    game.players = [p];
+
+    game.phase = "BUFF_USAGE";
+    assert.equal(useForceBuyCard(game, "p").success, false);
+
+    game.phase = "AUCTION";
+    game.currentEra = 2;
+    beginAuctionSession(game);
+    game.auctionFocusCardId = undefined;
+    assert.equal(useForceBuyCard(game, "p").success, false);
+
+    game.auctionFocusCardId = FORCE_BUY_CARD_ID;
+    assert.equal(useForceBuyCard(game, "p").success, false);
+    // 三次失败都不消耗手牌
+    assert.equal(p.inventory.filter((c) => c === FORCE_BUY_CARD_ID).length, 3);
+  });
+
+  it("lighter voids the played copy before touching the same card in hand", () => {
+    const game = createInitialGame("r", []);
+    game.phase = "BUFF_USAGE";
+    const a = player("a", { inventory: [LIGHTER_CARD_ID] });
+    const b = player("b", {
+      inventory: ["buff_insurance"],
+      activeBuffs: [{ cardId: "buff_insurance" }],
+    });
+    game.players = [a, b];
+
+    useBuffCard(game, "a", LIGHTER_CARD_ID, {
+      targetPlayerId: "b",
+      burnCardId: "buff_insurance",
+    });
+    resolveRoundBuffsAtSettlement(game);
+
+    // 已打出的一张被作废；手牌里的同名卡保留
+    assert.equal(b.activeBuffs.some((x) => x.cardId === "buff_insurance"), false);
+    assert.deepEqual(b.inventory, ["buff_insurance"]);
+    assert.equal(b.pendingLighterBurnNotices?.[0]?.kind, "played");
+    // 确认命中提示不应误删手牌
+    ackLighterBurnNotice(game, "b", b.pendingLighterBurnNotices?.[0]?.id);
+    assert.deepEqual(b.inventory, ["buff_insurance"]);
   });
 });

@@ -252,7 +252,7 @@ const StatusBar: React.FC<{
               ☕{" "}
               {coffeeLoading
                 ? "..."
-                : `来杯咖啡（-${COFFEE_WEALTH_COST}💰+${COFFEE_ENERGY_GAIN}⚡）`}
+                : `来杯咖啡（${COFFEE_WEALTH_COST} 财富换 ${COFFEE_ENERGY_GAIN} 精力）`}
             </button>
           )}
         </div>
@@ -398,13 +398,13 @@ export const Investment: React.FC<Props> = ({
 
   const showCoffeePurchaseSuccess = useCallback((cupsAfter: number) => {
     setCoffeeSuccessToast(
-      `咖啡购买成功（本轮第 ${cupsAfter} 杯） · -${COFFEE_WEALTH_COST}💰 +${COFFEE_ENERGY_GAIN}⚡`
+      `咖啡购买成功（本轮第 ${cupsAfter} 杯）：花费 ${COFFEE_WEALTH_COST} 财富，获得 ${COFFEE_ENERGY_GAIN} 精力`
     );
   }, []);
 
   const showCoffeeRefundSuccess = useCallback((refunded: number, cupsRemaining: number) => {
     setCoffeeSuccessToast(
-      `咖啡退订成功（${refunded} 杯） · +${refunded * COFFEE_WEALTH_COST}💰 −${refunded * COFFEE_ENERGY_GAIN}⚡ · 本轮剩余 ${cupsRemaining} 杯`
+      `咖啡退订成功（${refunded} 杯）：返还 ${refunded * COFFEE_WEALTH_COST} 财富，减少 ${refunded * COFFEE_ENERGY_GAIN} 精力；本轮剩余 ${cupsRemaining} 杯`
     );
   }, []);
 
@@ -484,7 +484,7 @@ export const Investment: React.FC<Props> = ({
     if (abandonWarnings.length > 0) {
       if (
         !window.confirm(
-          `确认提交？注意：你对 ${abandonWarnings.join(", ")} 本轮投入不足 ${LONG_CONTINUE_MIN_ENERGY}，将视为放弃：累计投入按 1:1 结算为财富，并退出该项目完成时的排名与时代加成。`
+          `确认提交？注意：你对 ${abandonWarnings.join(", ")} 本轮投入不足 ${LONG_CONTINUE_MIN_ENERGY} 点精力，将视为放弃：累计投入的每 1 点精力返还 1 点财富，并退出该项目完成时的排名与时代加成。`
         )
       ) {
         return;
@@ -845,7 +845,7 @@ export const Investment: React.FC<Props> = ({
             }}
           >
             倒计时结束将自动提交当前方案：{longAbandonRiskNames.join("、")} 未满 {LONG_CONTINUE_MIN_ENERGY}{" "}
-            精力，将视为放弃（1:1 结算累计投入，退出完成排名）。
+            点精力，将视为放弃（累计投入的每 1 点精力返还 1 点财富，并退出完成排名）。
           </div>
         )}
 

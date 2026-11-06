@@ -66,7 +66,7 @@ export const DemoEraTheme: React.FC = () => {
           <p style={{ margin: 0 }}>短期：恰好满额，该项目总投入第一 → +{ERA_BONUS_SHORT} 💰</p>
           <p style={{ margin: 0 }}>长期：满额或超填，该项目总投入第一 → +{ERA_BONUS_LONG} 💰</p>
           <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
-            短期投爆、风险项目：无时代加成。并列第 1 则均分。
+            短期投资失败（爆掉）、风险项目：无时代加成。并列第 1 则均分。
           </p>
         </aside>
       </div>

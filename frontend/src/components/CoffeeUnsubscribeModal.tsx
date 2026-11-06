@@ -262,7 +262,7 @@ export const CoffeeUnsubscribeModal: React.FC<Props> = ({
             lineHeight: 1.6,
           }}
         >
-          退订将按杯返还财富并减少精力（每杯 +{COFFEE_WEALTH_COST}💰、−{COFFEE_ENERGY_GAIN}⚡）。
+          退订会按杯返还财富并减少精力（每杯返还 {COFFEE_WEALTH_COST} 财富，减少 {COFFEE_ENERGY_GAIN} 精力）。
         </p>
         <label style={{ display: "block", marginBottom: "0.5rem", fontSize: uiRem(0.9), color: "var(--color-text-muted)" }}>
           退订杯数

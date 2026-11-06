@@ -279,6 +279,16 @@ function resolveOneLighter(
     return true;
   }
 
+  // 没打到任何卡：只告诉被指定者「未烧中」；使用者始终只看到「已使用」。
+  const name = cardName(burnCardId);
+  pushLighterNotice(target, {
+    id: randomUUID(),
+    cardId: burnCardId,
+    cardName: name,
+    kind: "miss",
+    casterName: decl.casterName,
+    message: `${decl.casterName} 对你使用了打火机，指定【${name}】，但没有烧掉你的任何卡`,
+  });
   return false;
 }
 

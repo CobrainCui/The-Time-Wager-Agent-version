@@ -96,7 +96,7 @@ function projectTable(obs: Observation): string {
           (p.rankRewards ? ` | 排名奖 ${p.rankRewards.join("/")}` : "") +
           (p.rate ? ` | 倍率 ${p.rate}` : "") +
           (p.era ? ` | 时代 ${p.era}` : "") +
-          (p.overInvestPenalty ? ` | 投爆惩罚 ${p.overInvestPenalty.join("/")}` : "")
+          (p.overInvestPenalty ? ` | 超额投资惩罚 ${p.overInvestPenalty.join("/")}` : "")
       )
       .join("\n") || "（暂无项目）"
   );

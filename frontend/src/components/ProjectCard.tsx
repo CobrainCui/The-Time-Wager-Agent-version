@@ -318,8 +318,8 @@ export const ProjectCard: React.FC<{
             aria-hidden={!showLongHint}
           >
             {longHintUrgent
-              ? `已参投：本轮须 ≥${LONG_CONTINUE_MIN_ENERGY} 精力，否则 1:1 结算累计投入并退出完成排名`
-              : `⚠️ 参投后每轮须 ≥${LONG_CONTINUE_MIN_ENERGY} 精力；不足则放弃并 1:1 结算累计投入，退出完成排名`}
+              ? `已参与投资：本轮至少投入 ${LONG_CONTINUE_MIN_ENERGY} 点精力，否则放弃结算（每 1 点精力返还 1 点财富）并退出完成排名`
+              : `⚠️ 参与投资后，每轮至少投入 ${LONG_CONTINUE_MIN_ENERGY} 点精力；不足则放弃结算（每 1 点精力返还 1 点财富），退出完成排名`}
           </div>
         )}
 

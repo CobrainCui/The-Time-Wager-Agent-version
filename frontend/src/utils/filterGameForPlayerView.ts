@@ -37,8 +37,16 @@ function mapPlayerForViewer(
     } as Player;
   }
 
+  const {
+    longTerm: _lt,
+    totalEnergyConsumed: _tec,
+    investedRiskEnergy: _ire,
+    investedLongEnergy: _ile,
+    ...peerPublic
+  } = peerWithoutEnergy;
+
   return {
-    ...peerWithoutEnergy,
+    ...peerPublic,
     ...energyField,
     ...slackAttribution,
     inventory: [] as string[],
@@ -49,8 +57,31 @@ function mapPlayerForViewer(
     pendingLighterBurnNotices: undefined,
     investmentDraft: undefined,
     investment: hideInvestments ? {} : p.investment,
-    coffeePurchasesThisRound: p.coffeePurchasesThisRound ?? 0,
+    // 咖啡杯数会间接暴露本轮精力操作，只给本人
+    coffeePurchasesThisRound: undefined,
+    ...(hideInvestments
+      ? {}
+      : {
+          longTerm: p.longTerm,
+          totalEnergyConsumed: p.totalEnergyConsumed,
+          investedRiskEnergy: p.investedRiskEnergy,
+          investedLongEnergy: p.investedLongEnergy,
+        }),
   } as Player;
+}
+
+function filterProjectForViewer(
+  project: GameState["activeProjects"][number],
+  viewerPlayerId: string
+): GameState["activeProjects"][number] {
+  const ownRecord = project.investorRecords?.[viewerPlayerId];
+  const ownSlices = project.investorRoundSlices?.[viewerPlayerId];
+  return {
+    ...project,
+    investorRecords: ownRecord != null ? { [viewerPlayerId]: ownRecord } : {},
+    investorRoundSlices: ownSlices ? { [viewerPlayerId]: ownSlices } : {},
+    earningRecords: {},
+  };
 }
 
 /** 主持台已有上帝全量 state 时，本地裁成某玩家可见画面（与 server serialize 玩家视角一致） */
@@ -94,11 +125,34 @@ export function filterGameForPlayerView(
     pendingWealthAdjustment: _pwa,
     isGodView: _g,
     adminPerspectivePlayerId: _ap,
+    // 道具/打火机内部流水只供上帝视图
+    roundBuffPlays: _rb,
+    lighterBurnDeclarations: _lb,
+    playerLogs: _pl,
     ...rest
   } = game;
 
+  const lastSettlement = rest.lastSettlement
+    ? (() => {
+        const { lighterResolve: _lr, ...settlement } = rest.lastSettlement as typeof rest.lastSettlement & {
+          lighterResolve?: unknown;
+        };
+        return settlement;
+      })()
+    : rest.lastSettlement;
+
   return {
     ...rest,
+    lastSettlement,
+    activeProjects: game.activeProjects.map((p) =>
+      filterProjectForViewer(p, viewerPlayerId)
+    ),
+    uncompletedProjects: game.uncompletedProjects.map((p) =>
+      filterProjectForViewer(p, viewerPlayerId)
+    ),
+    completedProjects: game.completedProjects.map((p) =>
+      filterProjectForViewer(p, viewerPlayerId)
+    ),
     players: game.players.map((p) =>
       mapPlayerForViewer(p, viewerPlayerId, hideInvestments, isGodView)
     ),

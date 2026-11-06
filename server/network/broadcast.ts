@@ -23,6 +23,39 @@ function energyVisibleToViewer(
   return isGodView || visibleToViewer;
 }
 
+/**
+ * 项目牌面只保留查看者自己的投入记录；他人的逐人投入、逐轮切片、
+ * 历史收益都不下发，避免从 payload 反推对手投资。
+ * 全场累计（accumulatedInvested）与总派彩（totalPayout）仍公开。
+ */
+function projectsForViewer(
+  projects: GameState["activeProjects"],
+  viewerPlayerId: string | null,
+  isGodView: boolean
+): GameState["activeProjects"] {
+  if (isGodView) return projects;
+  return projects.map((project) => {
+    const ownRecord = viewerPlayerId
+      ? project.investorRecords?.[viewerPlayerId]
+      : undefined;
+    const ownSlices = viewerPlayerId
+      ? project.investorRoundSlices?.[viewerPlayerId]
+      : undefined;
+    return {
+      ...project,
+      investorRecords:
+        viewerPlayerId && ownRecord != null
+          ? { [viewerPlayerId]: ownRecord }
+          : {},
+      investorRoundSlices:
+        viewerPlayerId && ownSlices
+          ? { [viewerPlayerId]: ownSlices }
+          : {},
+      earningRecords: {},
+    };
+  });
+}
+
 export function transactionsForViewer(
   transactions: Transaction[],
   viewerPlayerId: string | null | undefined,
@@ -64,6 +97,10 @@ export function serializeGameForClient(
     predictions,
     agentDecisions,
     chatUsage: _chatUsage,
+    // 道具/打火机内部流水只供服务端结算，不下发玩家
+    lighterBurnDeclarations: _lighterBurnDeclarations,
+    roundBuffPlays: _roundBuffPlays,
+    playerLogs: _playerLogs,
     ...gamePublic
   } = game;
   const hideInvestments = HIDDEN_INVESTMENT_PHASES.has(game.phase);
@@ -76,6 +113,15 @@ export function serializeGameForClient(
       ? (pendingWealthAdjustments ?? []).find((o) => o.playerId === viewerPlayerId)
       : undefined;
   const lotView = buildAuctionLotPublicView(game);
+  // 打火机命中/未命中摘要只给上帝视图；玩家不能据此判断自己的打火机是否成功
+  const lastSettlementForViewer = game.lastSettlement
+    ? isGodView
+      ? game.lastSettlement
+      : (() => {
+          const { lighterResolve: _lighterResolve, ...rest } = game.lastSettlement;
+          return rest;
+        })()
+    : undefined;
 
   const chatGroups = GROUP_CHAT_ENABLED
     ? chatGroupsForViewer(game, viewerPlayerId ?? null, isGodView)
@@ -90,6 +136,18 @@ export function serializeGameForClient(
 
   return {
     ...gamePublic,
+    ...(game.lastSettlement ? { lastSettlement: lastSettlementForViewer } : {}),
+    activeProjects: projectsForViewer(game.activeProjects, viewerPlayerId ?? null, isGodView),
+    uncompletedProjects: projectsForViewer(
+      game.uncompletedProjects,
+      viewerPlayerId ?? null,
+      isGodView
+    ),
+    completedProjects: projectsForViewer(
+      game.completedProjects,
+      viewerPlayerId ?? null,
+      isGodView
+    ),
     chatGroups,
     groupMessages,
     directMessages,
@@ -120,6 +178,9 @@ export function serializeGameForClient(
           sessionOrdinal: _sessionOrdinal ?? 0,
           auctionPoolCardIds: getAuctionCardIdsForGame(game),
           agentDecisions: agentDecisions ?? [],
+          roundBuffPlays: game.roundBuffPlays ?? [],
+          lighterBurnDeclarations: game.lighterBurnDeclarations ?? [],
+          playerLogs: game.playerLogs,
         }
       : {
           ...(ownLotteryOffer ? { pendingLotteryOffer: ownLotteryOffer } : {}),
@@ -190,7 +251,19 @@ export function serializeGameForClient(
         pendingLighterBurnNotices: undefined,
         investmentDraft: undefined,
         investment: hideInvestments ? {} : p.investment,
-        coffeePurchasesThisRound: p.coffeePurchasesThisRound ?? 0,
+        // 咖啡杯数会间接暴露本轮精力操作，只给本人
+        coffeePurchasesThisRound: undefined,
+        // 决策阶段不暴露他人的长期投入、精力去向与风险收益
+        ...(hideInvestments
+          ? {
+              longTerm: {},
+              riskGains: {},
+              totalEnergyConsumed: undefined,
+              investedRiskEnergy: undefined,
+              investedLongEnergy: undefined,
+              investedShortEnergy: undefined,
+            }
+          : {}),
       };
     }),
     transactions,

@@ -142,8 +142,9 @@ export function settlePhase(game: GameState, options?: SettlePhaseOptions) {
 }
 
 /**
- * 第四时代第二轮结算：仍未完成的长期项目按全场累计进度发梯度奖（1:1 / 1:5 / 1:10），
- * 计入本轮 snapshot.playerGains，并移入 uncompletedProjects。不含点石成金放大。
+ * 第四时代第二轮结算：仍未完成的长期项目按全场累计进度发梯度奖
+ * （每点精力返还 1 / 5 / 10 财富），计入本轮 snapshot.playerGains，并移入 uncompletedProjects。
+ * 梯度奖属于项目正向收益，持有【点石成金】时同样放大；放弃结算的返还与转账不放大。
  * 含本轮仍在牌面的长期，以及中途撤场（连续空投）已进 uncompleted 的长期。
  */
 function settleUnfinishedLongGradient(
@@ -204,7 +205,8 @@ function settleUnfinishedLongGradient(
       const myInvest = lt.totalInvested || 0;
       if (myInvest <= 0) continue;
 
-      const gain = myInvest * ratio;
+      const baseGain = myInvest * ratio;
+      const gain = applyGoldMultiplier(p, baseGain);
       p.wealth += gain;
 
       // 梯度行的「投入」用个人累计，与结算基数一致
@@ -213,6 +215,7 @@ function settleUnfinishedLongGradient(
       const g = result.playerGains[p.id] || zeroGain();
       g.base += gain;
       g.total += gain;
+      noteBeforeGold(g, "baseBeforeGold", baseGain, gain);
       result.playerGains[p.id] = g;
 
       if (!proj.earningRecords) proj.earningRecords = {};
@@ -220,7 +223,7 @@ function settleUnfinishedLongGradient(
       proj.earningRecords[p.id] = (proj.earningRecords[p.id] || 0) + gain;
 
       logs.push(
-        `📜 ${p.name} 结算长期项目「${proj.name}」(进度${totalProgress}/${proj.maxEnergy}, 比例1:${ratio}), 获得 ${gain}`
+        `📜 ${p.name} 结算长期项目「${proj.name}」(进度${totalProgress}/${proj.maxEnergy}, 每点精力返还${ratio}财富), 获得 ${gain}${gain !== baseGain ? "（点石成金生效）" : ""}`
       );
     }
 
@@ -426,9 +429,12 @@ export function settleOneProject(
     if (isExploded) {
       logs.push(`💥 风险项目「${project.name}」累计${totalAccumulated}，投入超过上限，投爆！`);
       game.players.forEach(p => {
-        // 【保险】本轮参与该风险项目（投入>0）且投爆：赔付 100（点石成金可×1.5）
-        const myRiskInvest = p.investment?.[project.id] || 0;
-        if (hasBuff(p, 'buff_insurance') && myRiskInvest > 0) {
+        // 【保险】整局曾投入过该风险项目（历史累计投入 > 0）且投爆：赔付 100（点石成金可×1.5）
+        // 历史参与也算，即使本轮没有再投；短期/长期项目不触发保险。
+        const everInvested =
+          (project.investorRecords?.[p.id] ?? 0) > 0 ||
+          (p.investment?.[project.id] ?? 0) > 0;
+        if (hasBuff(p, 'buff_insurance') && everInvested) {
             const payout = insurancePayout(p);
             p.wealth += payout;
             logs.push(`🛡️ ${p.name} 触发【保险】(风险项目)，获得赔付 ${payout} 财富！`);

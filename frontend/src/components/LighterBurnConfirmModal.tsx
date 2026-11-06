@@ -27,6 +27,7 @@ export const LighterBurnConfirmModal: React.FC<Props> = ({ notices, readOnly = f
   if (!notice) return null;
 
   const isInventory = notice.kind === "inventory";
+  const isMiss = notice.kind === "miss";
   const blocked = readOnly || submitting;
 
   return (
@@ -37,19 +38,27 @@ export const LighterBurnConfirmModal: React.FC<Props> = ({ notices, readOnly = f
         aria-modal="true"
         aria-labelledby="lighter-burn-title"
         style={{
-          border: "2px solid rgba(249,115,22,0.65)",
-          boxShadow: "0 0 60px rgba(249,115,22,0.28)",
+          border: isMiss
+            ? "2px solid rgba(148,163,184,0.55)"
+            : "2px solid rgba(249,115,22,0.65)",
+          boxShadow: isMiss
+            ? "0 0 40px rgba(148,163,184,0.18)"
+            : "0 0 60px rgba(249,115,22,0.28)",
           textAlign: "center",
         }}
       >
         <div style={{ fontSize: "3.5rem", marginBottom: "1rem" }} aria-hidden>
-          🔥
+          {isMiss ? "🕯️" : "🔥"}
         </div>
         <h3
           id="lighter-burn-title"
           style={{ fontSize: "1.35rem", fontWeight: 800, color: "white", marginBottom: "0.5rem" }}
         >
-          {isInventory ? "打火机 · 手牌被烧毁" : "打火机 · 本卡生效轮次内效果作废"}
+          {isMiss
+            ? "打火机 · 未烧中"
+            : isInventory
+              ? "打火机 · 手牌被烧毁"
+              : "打火机 · 本卡生效轮次内效果作废"}
         </h3>
         <p style={{ color: "var(--color-text-secondary)", marginBottom: "1rem", lineHeight: 1.5 }}>
           {notice.message}

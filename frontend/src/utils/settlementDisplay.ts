@@ -16,7 +16,7 @@ function formatGoldAwarePart(paid: number, beforeGold?: number): string {
     beforeGold > 0 &&
     Math.floor(beforeGold * 1.5) === paid
   ) {
-    return `（${beforeGold}）×1.5`;
+    return `（${beforeGold}）的 1.5 倍`;
   }
   return formatGainPart(paid);
 }
@@ -58,7 +58,7 @@ export function settlementSnapshotStatusSuffix(
   const longRowLabel = longSettlementStatusLabel(res);
   const shortRowLabel = shortExactSettlementStatusLabel(res);
   if (gains && isLongAbandonFromSnapshot(res, gains)) {
-    statusSuffix = " 🚫放弃·结算";
+    statusSuffix = " 🚫放弃结算";
     statusSuffixColor = "#9ca3af";
     rowColor = "#9ca3af";
   } else if (res.shortSold) {
@@ -66,7 +66,7 @@ export function settlementSnapshotStatusSuffix(
     statusSuffixColor = "#60a5fa";
     rowColor = "#60a5fa";
   } else if (res.isExploded && res.type !== "long") {
-    statusSuffix = " 💥投爆";
+    statusSuffix = " 💥投资失败";
     statusSuffixColor = "#f87171";
     rowColor = "#f87171";
   } else if (longRowLabel) {

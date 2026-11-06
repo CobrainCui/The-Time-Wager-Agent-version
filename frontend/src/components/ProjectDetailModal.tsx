@@ -135,7 +135,7 @@ function RulesSection({
         {settlementBlock}
         <div>
           <div style={ruleLabel}>基础回报</div>
-          <p style={ruleValue}>本轮投入的精力 × 10 财富/⚡（仅本轮投入者）</p>
+          <p style={ruleValue}>本轮每投入 1 点精力，回报 10 财富（只发给本轮投入的人）</p>
         </div>
         {rankRows.length > 0 && (
           <div>
@@ -160,7 +160,7 @@ function RulesSection({
         )}
         {penaltyRows.length > 0 && (
           <div>
-            <div style={ruleLabel}>超上限投爆惩罚（按历史总投入；投入相同则并列共享）</div>
+            <div style={ruleLabel}>超过上限的投资失败惩罚（按历史总投入；投入相同则并列共享）</div>
             <table style={{ width: "100%", fontSize: uiRem(0.8), borderCollapse: "collapse" }}>
               <tbody>
                 {penaltyRows.map(({ rank, value }) => (
@@ -180,7 +180,7 @@ function RulesSection({
         )}
         <div>
           <div style={ruleLabel}>时代加成</div>
-          <p style={ruleValue}>主题契合且历史总投入第 1（并列则均分）：+{ERA_BONUS_SHORT}（仅恰好满额；超上限投爆则无）</p>
+          <p style={ruleValue}>主题契合且历史总投入第 1（并列则均分）：+{ERA_BONUS_SHORT}（仅恰好满额；超过上限投资失败则没有）</p>
         </div>
       </div>
     );
@@ -193,12 +193,12 @@ function RulesSection({
         <div>
           <div style={ruleLabel}>跟投要求</div>
           <p style={ruleValue}>
-            参投后每轮须投入 ≥{LONG_CONTINUE_MIN_ENERGY} 精力，否则视为放弃：累计投入按 1:1 结算为财富，并退出完成时的排名与时代加成
+            参与投资后，每轮至少投入 {LONG_CONTINUE_MIN_ENERGY} 点精力，否则视为放弃：累计投入的每 1 点精力返还 1 点财富，并退出完成时的排名与时代加成
           </p>
         </div>
         <div>
           <div style={ruleLabel}>完成回报</div>
-          <p style={ruleValue}>达到或超过上限后：个人历史累计精力 × 15 财富（超填同样发放，无短期式投爆罚）</p>
+          <p style={ruleValue}>达到或超过上限后：个人历史累计投入的每 1 点精力回报 15 财富（超额完成同样发放，没有短期项目那种超额投资惩罚）</p>
         </div>
         {rankRows.length > 0 && (
           <div>
@@ -235,10 +235,10 @@ function RulesSection({
       {settlementBlock}
       <div>
         <div style={ruleLabel}>基础回报</div>
-        <p style={ruleValue}>未超上限：本轮投入 × {rate} 财富/⚡</p>
+        <p style={ruleValue}>未超过上限：本轮每投入 1 点精力，回报 {rate} 财富</p>
       </div>
       <div>
-        <div style={ruleLabel}>超上限投爆</div>
+        <div style={ruleLabel}>超过上限，投资失败</div>
         <p style={ruleValue}>追回你在本项目上的全部历史风险收益</p>
       </div>
       <p style={{ ...ruleValue, fontSize: uiRem(0.75), color: "var(--color-text-muted)" }}>

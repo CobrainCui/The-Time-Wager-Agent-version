@@ -81,9 +81,9 @@ const SIDEBAR_PROJECTS = SIDEBAR_ACTIVITY_ITEMS.find((i) => i.id === "projects")
 export const HELP_SIDEBAR_PROJECTS_LABEL = SIDEBAR_PROJECTS.label;
 export const HELP_SIDEBAR_PROJECTS_TITLE = SIDEBAR_PROJECTS.title;
 
-/** 对局内查看投爆罚 / 回报档位（侧栏「项目总览」表列） */
+/** 对局内查看超额投资惩罚 / 回报档位（侧栏「项目总览」表列） */
 export const HELP_SIDEBAR_PROJECT_BURST_COLUMN =
-  `玩家侧栏「${HELP_SIDEBAR_PROJECTS_LABEL}」（${HELP_SIDEBAR_PROJECTS_TITLE}）表「投爆罚」列`;
+  `玩家侧栏「${HELP_SIDEBAR_PROJECTS_LABEL}」（${HELP_SIDEBAR_PROJECTS_TITLE}）表「超额投资罚」列`;
 export const HELP_SIDEBAR_PROJECT_RETURN_COLUMN =
   `玩家侧栏「${HELP_SIDEBAR_PROJECTS_LABEL}」（${HELP_SIDEBAR_PROJECTS_TITLE}）表「回报」列`;
 
@@ -101,7 +101,7 @@ function tutorialPlaySidebarColumnRef(columnLabel: string): string {
 
 /** 规则表展开说明中指向试玩区侧栏项目表 */
 export const TUTORIAL_REF_PROJECT_DATA_PREVIEW = `见下方试玩区侧栏「${HELP_SIDEBAR_PROJECTS_LABEL}」`;
-export const TUTORIAL_REF_PREVIEW_TABLE_BURST = tutorialPlaySidebarColumnRef("投爆罚");
+export const TUTORIAL_REF_PREVIEW_TABLE_BURST = tutorialPlaySidebarColumnRef("超额投资罚");
 export const TUTORIAL_REF_PREVIEW_TABLE_RETURN = tutorialPlaySidebarColumnRef("回报");
 export const TUTORIAL_REF_PREVIEW_TABLE_RANK = tutorialPlaySidebarColumnRef("排名奖");
 
@@ -170,19 +170,19 @@ export const GUIDE_AUCTION_TAIL_BULLETS = [
 export const BUFF_SIDEBAR_BRIEF: Record<string, string[]> = {
   buff_slack: [
     "指定一名玩家（含自己）",
-    "对方精力 **−8（可低于 0）**",
-    "有劳逸结合被动则改为 **+8 精力**",
+    "对方精力 **减少 8 点（可低于 0）**",
+    "有劳逸结合被动则改为 **增加 8 点精力**",
     "摸鱼使精力为负时，已锁定的投资会自动解锁",
   ],
   buff_insurance: [
-    "本卡生效轮次内参与的风险项目投爆",
-    "**赔付 100** 财富",
-    "点石成金对赔付 **×1.5 向下取整**",
+    "整局曾投入过的风险项目投资失败（爆掉）",
+    "**赔付 100 财富**；只保风险项目，短期/长期不赔",
+    "点石成金对赔付按 **1.5 倍向下取整**",
   ],
   buff_gold: [
-    "**正向收益 ×1.5 向下取整**",
-    "含基础、排名、时代、彩票、保险赔付",
-    "**四时代未完长期梯度、退款、转账不放大**",
+    "**正向收益按 1.5 倍向下取整**",
+    "含基础、排名、时代、第四时代未完成长期进度奖、彩票、保险赔付",
+    "**放弃结算的返还、玩家间转账不放大**",
     "**惩罚不放大**",
   ],
   buff_force_buy: [
@@ -193,17 +193,21 @@ export const BUFF_SIDEBAR_BRIEF: Record<string, string[]> = {
   ],
   buff_short: [
     "投资阶段（提交锁定前）声明，**结算页判定**",
-    "**全员**在该项目**已积累精力全部清零**（含长期进度与本卡生效轮次内已投入的精力，**含使用者自己**）",
-    "**已入账财富不追回**",
+    "**全员**在该项目**已积累的精力全部清零**（含长期进度与本卡生效轮次内已投入的精力，**含使用者自己**）",
+    "**已经入账的财富不追回**",
   ],
   buff_work_rest: [
     "指定一名在局玩家",
-    "本卡生效轮次内被摸鱼时**不减精力而 +8**",
-    "发动时**追溯改判本卡生效轮次内已发生的摸鱼**",
-    "打火机作废摸鱼时，对应改判同步撤销",
+    "本卡生效轮次内被摸鱼时**不减精力，反而增加 8 点**",
+    "发动时**追溯改判本卡生效轮次内已经发生的摸鱼**",
+    "打火机作废摸鱼时，对应改判同步撤销；劳逸结合不会退回手牌",
   ],
   buff_lighter: [...LIGHTER_CARD_BULLETS],
-  buff_lottery: ["系统线上随机掷 1–6 点定奖金", "点数 1/2/3/4/5/6 → 0/30/60/90/120/200", "点石成金对奖金 **×1.5 向下取整**"],
+  buff_lottery: [
+    "系统线上随机掷 1–6 点定奖金",
+    "掷出 1 点没有奖金；2 点 30 财富；3 点 60 财富；4 点 90 财富；5 点 120 财富；6 点 200 财富",
+    "点石成金对奖金按 **1.5 倍向下取整**",
+  ],
 };
 
 export interface GuideResourceRow {
@@ -217,7 +221,7 @@ export const GUIDE_RESOURCE_ROWS: GuideResourceRow[] = [
     label: "咖啡",
     brief: `投资阶段 ${COFFEE_WEALTH_COST} 财富换 ${COFFEE_ENERGY_GAIN} 精力；本轮未提交可退订`,
   },
-  { label: "赛制", brief: "4 时代 × 每时代 2 轮；终局按财富决胜" },
+  { label: "赛制", brief: "4 个时代，每个时代 2 轮；终局按财富决胜" },
 ];
 
 export const TUTORIAL_RESOURCE_WEALTH_LINE = `💰 财富：开局每人 ${STARTING_WEALTH}；终局最高者胜，可为社区命名。`;

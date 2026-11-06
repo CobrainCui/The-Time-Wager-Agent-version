@@ -54,7 +54,7 @@ export const DemoTiedRank: React.FC = () => {
         </div>
       </div>
       <p style={{ marginTop: "0.75rem", fontSize: uiRem(0.95), color: "var(--color-text-muted)" }}>
-        短期超上限投爆时，并列同样均分对应档位的惩罚池。
+        短期超过上限、投资失败时，并列同样均分对应档位的惩罚池。
       </p>
     </div>
   );

@@ -3,9 +3,10 @@ import { describe, it } from "node:test";
 import {
   groupInvestorsByTiedTotal,
   settleOneProject,
+  settlePhase,
   sharedPoolAmount,
 } from "./projectSettlement.js";
-import { ActiveProject, GameState, Player } from "../state/gameState.js";
+import { ActiveProject, createInitialGame, GameState, Player } from "../state/gameState.js";
 
 function makePlayer(id: string, overrides: Partial<Player> = {}): Player {
   return {
@@ -142,9 +143,9 @@ describe("settleOneProject tied sharing", () => {
     assert.equal(p3.wealth, 30 - 15);
   });
 
-  it("risk explode: insurance pays if invested this round even under 5", () => {
+  it("risk explode: insurance pays for historical participation even with no current investment", () => {
     const insured = makePlayer("insured", {
-      investment: { 201: 3 },
+      investment: {},
       activeBuffs: [{ cardId: "buff_insurance" }],
     });
     const spectator = makePlayer("spectator", {
@@ -157,10 +158,11 @@ describe("settleOneProject tied sharing", () => {
       type: "risk",
       era: "气候",
       maxEnergy: 10,
-      accumulatedInvested: 8,
+      accumulatedInvested: 11,
       currentInvested: 0,
       roundsNoInvestment: 0,
       investedThisRound: false,
+      // insured 上一轮投过 8，本轮没有再加；历史参与也算
       investorRecords: { insured: 8 },
       earningRecords: {},
       totalPayout: 0,
@@ -169,7 +171,6 @@ describe("settleOneProject tied sharing", () => {
     const result = settleOneProject(game, project, []);
 
     assert.equal(result.isExploded, true);
-    // 本轮投入 3>0 → 赔 100；旁观者本轮 0 → 不赔
     assert.equal(insured.wealth, 100);
     assert.equal(spectator.wealth, 0);
     assert.equal(result.playerGains.insured?.total, 100);
@@ -266,5 +267,84 @@ describe("settleOneProject tied sharing", () => {
 
     assert.equal(project.investorRecords.p1, 8);
     assert.deepEqual(project.investorRoundSlices?.p1, [5, 3]);
+  });
+});
+
+describe("gold and long-abandon edge rules", () => {
+  it("gold amplifies the era-4 unfinished long progress payout", () => {
+    const p1 = makePlayer("p1", {
+      wealth: 0,
+      investment: { 101: 10 },
+      activeBuffs: [{ cardId: "buff_gold" }],
+    });
+    const p2 = makePlayer("p2", { wealth: 0, investment: { 101: 10 } });
+    const project: ActiveProject = {
+      id: 101,
+      name: "测试长期",
+      type: "long",
+      era: "气候",
+      maxEnergy: 90,
+      accumulatedInvested: 0,
+      currentInvested: 0,
+      roundsNoInvestment: 0,
+      investedThisRound: false,
+      investorRecords: {},
+      earningRecords: {},
+      totalPayout: 0,
+      rankRewards: [65, 45, 35, 25, 20, 10],
+    };
+    const game = createInitialGame("room", []);
+    game.players = [p1, p2];
+    game.currentEra = 4;
+    game.roundInEra = 2;
+    game.globalRound = 8;
+    game.currentEraCard = { era: "气候" } as GameState["currentEraCard"];
+    game.activeProjects = [project];
+
+    settlePhase(game);
+
+    // 总进度 20/90，未达三分之一 → 每点精力返还 1 财富
+    // p1 持点石成金：floor(10 × 1.5) = 15；p2 原额 10
+    assert.equal(p1.wealth, 15);
+    assert.equal(p2.wealth, 10);
+  });
+
+  it("gold does not amplify long-abandon 1:1 settlement", () => {
+    const p1 = makePlayer("p1", {
+      wealth: 0,
+      investment: {},
+      longTerm: {
+        101: { totalInvested: 10, status: "active", roundSlices: [10] },
+      },
+      activeBuffs: [{ cardId: "buff_gold" }],
+    });
+    const project: ActiveProject = {
+      id: 101,
+      name: "测试长期",
+      type: "long",
+      era: "气候",
+      maxEnergy: 90,
+      accumulatedInvested: 10,
+      currentInvested: 0,
+      roundsNoInvestment: 0,
+      investedThisRound: false,
+      investorRecords: { p1: 10 },
+      earningRecords: {},
+      totalPayout: 0,
+      rankRewards: [65, 45, 35, 25, 20, 10],
+    };
+    const game = createInitialGame("room", []);
+    game.players = [p1];
+    game.currentEra = 4;
+    game.roundInEra = 1;
+    game.globalRound = 7;
+    game.currentEraCard = { era: "气候" } as GameState["currentEraCard"];
+    game.activeProjects = [project];
+
+    settlePhase(game);
+
+    // 放弃结算：每 1 点精力返还 1 财富，点石成金不放大
+    assert.equal(p1.wealth, 10);
+    assert.equal(p1.longTerm[101]?.status, "abandoned");
   });
 });

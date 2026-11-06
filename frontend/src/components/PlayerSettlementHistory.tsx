@@ -88,7 +88,7 @@ function InvestQuickTable({ rows }: { rows: ProjectInvestQuickRow[] }) {
                   borderBottom: "1px solid rgba(255,255,255,0.06)",
                 }}
               >
-                {row.cumulativeEnergy}⚡
+                {row.cumulativeEnergy} 精力
               </td>
             </tr>
           ))}

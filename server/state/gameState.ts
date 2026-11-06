@@ -273,7 +273,8 @@ export interface LighterBurnNotice {
   id: string;
   cardId: string;
   cardName: string;
-  kind: "inventory" | "played";
+  /** played/inventory=命中；miss=被指定但没烧掉任何卡 */
+  kind: "inventory" | "played" | "miss";
   casterName: string;
   message: string;
   energyRefund?: number;

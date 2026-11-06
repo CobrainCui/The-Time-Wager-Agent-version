@@ -200,7 +200,8 @@ export interface LighterBurnNotice {
   id: string;
   cardId: string;
   cardName: string;
-  kind: "inventory" | "played";
+  /** played/inventory=命中；miss=被指定但没烧掉任何卡 */
+  kind: "inventory" | "played" | "miss";
   casterName: string;
   message: string;
   energyRefund?: number;
@@ -316,6 +317,18 @@ export interface SettlementProjectResult {
   playerGains: Record<string, GainBreakdown>;
 }
 
+export type LotterySource = "random.org" | "server" | "manual";
+
+export interface LotteryOffer {
+  offerId: string;
+  playerId: string;
+  amount: number;
+  /** 线上随机骰子点数 1–6 */
+  roll?: number;
+  source?: LotterySource;
+  drawnAt?: number;
+}
+
 export interface GameState {
   roomId: string;
   players: Player[];
@@ -372,10 +385,18 @@ export interface GameState {
   pendingEvents?: Record<string, EventCard>; 
 
   logs: string[];
+  /** 仅上帝视图：本轮道具流水（玩家视图不下发） */
+  roundBuffPlays?: Record<string, unknown>[];
+  /** 仅上帝视图：本轮打火机声明（玩家视图不下发） */
+  lighterBurnDeclarations?: Record<string, unknown>[];
+  /** 仅上帝视图：玩家个人日志（玩家视图不下发） */
+  playerLogs?: Record<string, string[]>;
 
   lastSettlement?: {
     round: number;
     results: SettlementProjectResult[];
+    /** 仅上帝视图：本轮打火机命中/未命中摘要 */
+    lighterResolve?: { hits: number; misses: number };
     hostAdjusted?: boolean;
     hostRevision?: number;
   };
@@ -460,9 +481,9 @@ export interface GameState {
   /** @deprecated */
   myPendingAuctionOffers?: { offerId: string; playerId: string; cardId: string; cost: number }[];
   /** 仅管理端：待玩家确认的彩票开奖 */
-  pendingLotteryOffers?: { offerId: string; playerId: string; amount: number }[];
+  pendingLotteryOffers?: LotteryOffer[];
   /** 仅本人：待确认的彩票开奖（刷新/重连后仍显示弹窗） */
-  pendingLotteryOffer?: { offerId: string; playerId: string; amount: number };
+  pendingLotteryOffer?: LotteryOffer;
   /** 仅管理端：已确认彩票开奖 */
   lotteryCompletedDeals?: { playerId: string; amount: number }[];
   /** 仅管理端：待玩家确认的财富调整 */

@@ -53,7 +53,7 @@ export const DemoResources: React.FC<{ playerName?: string }> = () => {
         style={{ width: "100%", accentColor: "#3b82f6", marginBottom: "0.5rem" }}
       />
       <p style={{ margin: 0, fontSize: uiRem(0.85), color: "var(--color-text-muted)" }}>
-        已分配 {spent} ⚡（本轮提交前可调整）
+        已分配 {spent} 点精力（本轮提交前可调整）
       </p>
     </div>
   );

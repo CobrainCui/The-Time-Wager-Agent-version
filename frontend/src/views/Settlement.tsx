@@ -41,7 +41,7 @@ function formatGoldAwarePart(paid: number, beforeGold?: number): string {
     beforeGold > 0 &&
     Math.floor(beforeGold * 1.5) === paid
   ) {
-    return `（${beforeGold}）×1.5`;
+    return `（${beforeGold}）的 1.5 倍`;
   }
   return formatGainPart(paid);
 }
@@ -167,7 +167,7 @@ const GlobalCard: React.FC<{
     statusText = longLabel.text;
     statusColor = longLabel.color;
   } else if (burstExploded) {
-    statusText = "💥 投爆";
+    statusText = "💥 投资失败";
     statusColor = "#ef4444";
   } else if (shortExactLabel) {
     statusText = shortExactLabel.text;
@@ -370,11 +370,11 @@ export const Settlement: React.FC<Props> = ({ game, me, embed = false }) => {
       statusSuffixColor = "#60a5fa";
       rowColor = "#60a5fa";
     } else if (res.isExploded && res.type !== "long") {
-      statusSuffix = " 💥投爆";
+      statusSuffix = " 💥投资失败";
       statusSuffixColor = "#f87171";
       rowColor = "#f87171";
     } else if (res.type === "long" && longState === "abandoned") {
-      statusSuffix = " 🚫放弃·结算";
+      statusSuffix = " 🚫放弃结算";
       statusSuffixColor = "#9ca3af";
       rowColor = "#9ca3af";
     } else if (longRowLabel) {

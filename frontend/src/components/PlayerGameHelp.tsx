@@ -149,7 +149,7 @@ function annotateDynamicRows(rows: ProjectHelpRow[]): { row: ProjectHelpRow; aft
   });
 }
 
-/** 与「不可再投项目」同一套列：名称 / 时代 / 类型 / 上限 / 回报 / 排名奖 / 投爆罚 / 状态 */
+/** 与「不可再投项目」同一套列：名称 / 时代 / 类型 / 上限 / 回报 / 排名奖 / 超额罚 / 状态 */
 function projectStatTableHeaders(rankTierCount: number): string[] {
   return [
     "名称",
@@ -158,7 +158,7 @@ function projectStatTableHeaders(rankTierCount: number): string[] {
     "上限",
     "回报",
     `排名奖(1–${rankTierCount})`,
-    `投爆罚(1–${rankTierCount})`,
+    `超额投资罚(1–${rankTierCount})`,
     "状态",
   ];
 }

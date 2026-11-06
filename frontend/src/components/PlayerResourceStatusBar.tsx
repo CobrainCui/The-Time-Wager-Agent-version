@@ -86,7 +86,7 @@ export const PlayerResourceStatusBar: React.FC<PlayerResourceStatusBarProps> = (
             ☕{" "}
             {coffee.loading
               ? "..."
-              : `来杯咖啡（-${COFFEE_WEALTH_COST}💰+${COFFEE_ENERGY_GAIN}⚡）`}
+              : `来杯咖啡（${COFFEE_WEALTH_COST} 财富换 ${COFFEE_ENERGY_GAIN} 精力）`}
           </button>
         )}
         {trailing}

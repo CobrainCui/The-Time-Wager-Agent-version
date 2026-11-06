@@ -459,7 +459,7 @@ export const AdminView: React.FC<Props> = ({
     const goldApplied = !!target?.activeBuffs?.some((b) => b.cardId === "buff_gold") && parsed > 0;
     const credited = goldApplied ? Math.floor(parsed * 1.5) : parsed;
     const amountLabel = goldApplied
-      ? `（${parsed}）×1.5 = ${credited} 财富（点石成金，向下取整）`
+      ? `（${parsed}）的 1.5 倍 = ${credited} 财富（点石成金，向下取整）`
       : `${parsed} 财富`;
     if (!window.confirm(`向 ${playerName} 发送彩票开奖确认：${amountLabel}？\n确认后才会入账。`)) return;
     emit("adminSettleLottery", { targetPlayerId: playerId, amount: parsed });
@@ -1463,7 +1463,7 @@ export const AdminView: React.FC<Props> = ({
                     const pendingWealth = (game.pendingWealthAdjustments ?? []).find((o) => o.playerId === p.id);
                     const pendingAmountLabel =
                       pendingLottery && hasGold && pendingLottery.amount > 0
-                        ? `（${pendingLottery.amount}）×1.5`
+                        ? `（${pendingLottery.amount}）的 1.5 倍`
                         : pendingLottery
                           ? String(pendingLottery.amount)
                           : "";

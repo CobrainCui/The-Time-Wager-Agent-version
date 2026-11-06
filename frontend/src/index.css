@@ -3637,3 +3637,94 @@ h1, h2, h3, h4, h5, h6 {
   background: rgba(4, 6, 12, 0.92);
   backdrop-filter: blur(6px);
 }
+
+/* =========================================
+   彩票线上随机开奖：骰子动画
+   ========================================= */
+
+.lottery-dice {
+  width: 5.5rem;
+  height: 5.5rem;
+  margin: 0 auto;
+  padding: 0.55rem;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 0.3rem;
+  border-radius: 1.15rem;
+  background:
+    radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.22), transparent 52%),
+    linear-gradient(145deg, #fb7185 0%, #db2777 48%, #9d174d 100%);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow:
+    0 14px 34px rgba(219, 39, 119, 0.34),
+    inset 0 -6px 14px rgba(0, 0, 0, 0.28),
+    inset 0 4px 10px rgba(255, 255, 255, 0.16);
+  transform-style: preserve-3d;
+}
+
+.lottery-dice--rolling {
+  animation: lottery-dice-tumble 0.42s linear infinite;
+}
+
+.lottery-dice__pip {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 90ms ease, transform 90ms ease;
+  background: radial-gradient(circle at 35% 30%, #ffffff, #fbcfe8 60%, #f9a8d4);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.lottery-dice__pip.is-on {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.lottery-prize-reveal {
+  animation: lottery-prize-pop 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.35) both;
+}
+
+@keyframes lottery-dice-tumble {
+  0% {
+    transform: rotate(0deg) translateY(0) scale(1);
+  }
+  25% {
+    transform: rotate(-14deg) translateY(-6px) scale(1.04);
+  }
+  50% {
+    transform: rotate(9deg) translateY(0) scale(0.98);
+  }
+  75% {
+    transform: rotate(-5deg) translateY(-3px) scale(1.02);
+  }
+  100% {
+    transform: rotate(0deg) translateY(0) scale(1);
+  }
+}
+
+@keyframes lottery-prize-pop {
+  0% {
+    transform: scale(0.82);
+    filter: brightness(1.8);
+  }
+  60% {
+    transform: scale(1.04);
+    filter: brightness(1.15);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lottery-dice--rolling {
+    animation: none;
+  }
+  .lottery-prize-reveal {
+    animation: none;
+  }
+}

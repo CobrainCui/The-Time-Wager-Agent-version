@@ -5,7 +5,7 @@ import { STARTING_WEALTH } from "../../config/startingWealth";
 const ITEMS = [
   { id: "wealth", label: `开局每人 ${STARTING_WEALTH} 财富，可买咖啡或留作拍卖/转账` },
   { id: "energy", label: "每轮精力会重置，鼓励花完" },
-  { id: "long", label: "长期参投后断供（<3）会 1:1 结算累计投入并退出完成排名" },
+  { id: "long", label: "长期项目参与投资后，每轮至少投 3 点精力；不足会按累计投入每 1 点精力返还 1 点财富，并退出完成排名" },
   { id: "risk", label: "风险项目超上限会倒扣历史收益" },
   { id: "tie", label: "投入相同则并列，共享奖励/惩罚/时代加成" },
   { id: "era", label: "时代加成：短期恰好满额/长期满或超，契合主题第 1 名；短期爆与风险无" },

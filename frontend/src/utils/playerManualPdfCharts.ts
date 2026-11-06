@@ -47,7 +47,7 @@ export const PDF_PROJECT_BAR_COLORS = [
 ] as const;
 
 /** 与 buildPdfProjectParticipationChart 三列顺序一致 */
-export const PDF_PROJECT_BAR_AXIS_LABELS = ["未完成", "恰好完成", "投爆"] as const;
+export const PDF_PROJECT_BAR_AXIS_LABELS = ["未完成", "恰好完成", "投资失败"] as const;
 
 export function buildPdfProjectBarChartColors(): [string, string, string] {
   return [
