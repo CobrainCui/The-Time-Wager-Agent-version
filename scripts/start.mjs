@@ -17,7 +17,7 @@ if (missing.length > 0) {
 }
 
 console.log("");
-console.log("=== 光阴对赌 · Agent 版本地运行 ===");
+console.log("=== 光阴对弈 · Agent 版本地运行 ===");
 console.log("管理员前端：http://localhost:3001/admin.html");
 console.log("按 Ctrl+C 结束全部进程");
 console.log("");

@@ -2,7 +2,7 @@
   "name": "guangyin-server-new",
   "version": "1.0.0",
   "type": "module",
-  "description": "光阴对赌新新新 服务端",
+  "description": "光阴对弈新新新 服务端",
   "main": "dist/index.js",
   "engines": {
     "node": ">=20",

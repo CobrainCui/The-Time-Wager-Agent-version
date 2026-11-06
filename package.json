@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "光阴对赌 · 全 AI Agent 实验室版（LLM-only、可复现、管理端观察与数据导出，本地运行）",
+  "description": "光阴对弈 · 全 AI Agent 实验室版（LLM-only、可复现、管理端观察与数据导出，本地运行）",
   "engines": {
     "node": ">=20",
     "npm": ">=10"

@@ -32,7 +32,7 @@ export interface TutorialSlide {
 
 export const TUTORIAL_SLIDES: TutorialSlide[] = [
     {
-        title: "欢迎来到《光阴对赌》",
+        title: "欢迎来到《光阴对弈》",
         icon: "⚖️",
         intro: true,
         content: [

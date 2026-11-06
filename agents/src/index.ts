@@ -8,7 +8,7 @@ async function main(): Promise<void> {
   const runtime = loadRuntimeConfig();
   initFileLogging(runtime.logDir);
 
-  log.info("光阴对赌 · Agent 实验运行时（LLM-only，无规则兜底）");
+  log.info("光阴对弈 · Agent 实验运行时（LLM-only，无规则兜底）");
   log.info(`房间：${runtime.roomId}`);
   log.info(`服务端：${runtime.serverUrl}`);
   log.info(

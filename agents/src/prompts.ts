@@ -78,7 +78,7 @@ export function getRulesKnowledge(): string {
  */
 export function buildSystemPrompt(agent: AgentConfig): string {
   return [
-    "你是《光阴对赌（The Time Wager）》中的一名玩家。",
+    "你是《光阴对弈（The Time Gambit）》中的一名玩家。",
     `你的编号是 ${agent.name}（第 ${agent.index} 号座位）。你与另外 5 名玩家共 6 人同桌。`,
     "游戏共 4 个时代 × 2 轮 = 8 个全局轮，时代 2、3、4 开始前各有 1 场拍卖。",
     "你的唯一目标：在游戏结束时拥有尽可能高的财富，并争取第一名。",

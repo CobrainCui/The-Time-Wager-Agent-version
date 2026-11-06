@@ -537,5 +537,5 @@ setInterval(() => {
 }, 1000);
 
 server.listen(PORT, () => {
-  console.log(`✅ 光阴对赌新新新 Server running on port ${PORT}`);
+  console.log(`✅ 光阴对弈新新新 Server running on port ${PORT}`);
 });

@@ -81,7 +81,7 @@ function sampleMessages(session, player) {
 
 function promptFor(player, samples) {
   return [
-    "你是桌游《光阴对赌》的社交行为评估器。",
+    "你是桌游《光阴对弈》的社交行为评估器。",
     "只根据该玩家自己发出的群聊与私信，评价其社交表现；不要评价投资水平、财富或胜负。",
     "",
     "A 优秀：主动合作、信息透明、建设性谈判、尊重他人，能促成多方共赢。",

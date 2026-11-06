@@ -11,7 +11,7 @@ for (const dir of ["server", "agents", "frontend"]) {
 ensureEnvFile();
 
 console.log("");
-console.log("=== 光阴对赌 · Agent 版本地开发 ===");
+console.log("=== 光阴对弈 · Agent 版本地开发 ===");
 console.log("管理员前端：http://localhost:5173/admin.html");
 console.log("服务端 API ：http://127.0.0.1:3001");
 console.log("按 Ctrl+C 结束全部进程");

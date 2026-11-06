@@ -118,7 +118,7 @@ export const Lobby: React.FC<Props> = ({ game }) => {
               letterSpacing: "-0.02em",
             }}
           >
-            光阴对赌
+            光阴对弈
           </div>
           <div
             style={{
@@ -129,7 +129,7 @@ export const Lobby: React.FC<Props> = ({ game }) => {
               color: "var(--color-text-muted)",
             }}
           >
-            Time Stakes
+            Time Gambit
           </div>
         </div>
 
